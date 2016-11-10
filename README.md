@@ -1,7 +1,7 @@
 knossos_cuber
 =============
 
-A Python script that converts images into a **Knossos**-readable format.
+A Python script that converts images into a **KNOSSOS**-readable format.
 
 Prerequisites
 -------------
@@ -57,4 +57,4 @@ Usage
 Afterword
 ---------
 
-`knossos_cuber` is part of **Knossos**. Head to **Knossos'** [main site](http://www.knossostool.org) or our [Github Repository](https://github.com/knossos-project/knossos) for more information.
+`knossos_cuber` is part of **KNOSSOS**. Head to **KNOSSOS'** [main site](http://www.knossostool.org) or our [Github Repository](https://github.com/knossos-project/knossos) for more information.
