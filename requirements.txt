@@ -1,0 +1,4 @@
+scipy
+numpy
+future>=0.15
+Pillow
