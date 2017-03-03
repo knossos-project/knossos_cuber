@@ -143,8 +143,8 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     """TODO
     """
 
-    target_path = config.get('Project', 'target_path') + '/mag1/'
-    exp_name = config.get('Project', 'exp_name') + '_mag1'
+    target_path = config.get('Project', 'target_path')
+    exp_name = config.get('Project', 'exp_name')
 
     scaling = literal_eval(config.get('Dataset', 'scaling'))
     boundaries = literal_eval(config.get('Dataset', 'boundaries'))
