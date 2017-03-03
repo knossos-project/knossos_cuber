@@ -975,12 +975,14 @@ def knossos_cuber(config, log_fn):
         source_dims = literal_eval(config.get('Dataset', 'source_dims'))
         boundaries = (source_dims[0], source_dims[1], len(all_source_files))
         config.set('Dataset', 'boundaries', str(boundaries))
-        dataset_base_path = config.get('Project', 'target_path') + '/mag1/'
+        dataset_base_path = config.get('Project', 'target_path')
         scale = literal_eval(config.get('Dataset', 'scaling'))
-        exp_name = config.get('Project', 'exp_name') + '_mag1'
+        exp_name = config.get('Project', 'exp_name')
 
 
-        write_knossos_conf(dataset_base_path, scale, boundaries, exp_name,
+        write_knossos_conf(dataset_base_path + "/", scale, boundaries, exp_name,
+                           mag=1)
+        write_knossos_conf(dataset_base_path + "/mag1/", scale, boundaries, exp_name,
                            mag=1)
 
         total_mag1_time = time.time() - mag1_ref_time
