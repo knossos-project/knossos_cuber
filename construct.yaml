@@ -1,0 +1,12 @@
+name: knossos_cuber
+version: 1.0
+
+channels:
+  - http://repo.continuum.io/pkgs/anaconda
+  - https://conda.anaconda.org/mdraw
+
+specs:
+  - python >=3.6
+  - knossos_cuber
+
+license_file: LICENSE

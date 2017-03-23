@@ -1,0 +1,48 @@
+{% set name = "knossos_cuber" %}
+{% set version = "1.0" %}
+#{% set sha256 = "" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+source:
+  fn: master.zip
+  url: https://github.com/knossos-project/knossos_cuber/archive/master.zip
+  #sha256: {{ sha256 }}
+
+build:
+  number: 0
+  script: python setup.py install --single-version-externally-managed --record record.txt
+
+requirements:
+  build:
+    - python
+    - setuptools
+    - numpy
+    - scipy
+    - pillow
+    - pyqt >=5.6
+
+  run:
+    - python
+    - setuptools
+    - numpy
+    - scipy
+    - pillow
+    - pyqt >=5.6
+
+test:
+  commands:
+    - knossos_cuber -h
+
+about:
+  home: https://github.com/knossos-project/knossos_cuber
+  license: GPLv2
+  license_file: LICENSE
+  summary: 'Converts images into a KNOSSOS-readable format.'
+  dev_url: https://github.com/knossos-project/knossos_cuber
+
+extra:
+  recipe-maintainers:
+    - mdraw
