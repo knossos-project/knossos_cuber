@@ -2,20 +2,20 @@ name: knossos_cuber
 version: 1.0
 
 channels:
-  - http://repo.continuum.io/pkgs/anaconda
+  - https://repo.continuum.io/pkgs/anaconda
   - https://conda.anaconda.org/mdraw
 
 specs:
   - python >=3.6
-  - nomkl
+  - nomkl [linux]
   - knossos_cuber
 
 exclude:
-  - glib
-  - gstreamer
-  - gst-plugins-base
-  - libgcc
-  - libgfortran
-  - tk
+  - glib [linux]
+  - gstreamer [linux]
+  - gst-plugins-base [linux]
+  - libgcc [linux]
+  - libgfortran [linux]
+  - tk [linux]
 
 license_file: LICENSE
