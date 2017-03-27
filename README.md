@@ -6,9 +6,14 @@ A Python application that converts images into a **KNOSSOS**-readable format.
 Prerequisites
 -------------
 
-You can choose either one or both of the following two installation methods:
+You can choose one of the following two installation methods:
 
-### 1. System-wide installation ###
+### 1. Automatic installers ###
+
+We have published installers for Windows and Linux [here](https://github.com/knossos-project/knossos_cuber/releases/tag/v1-alpha2).
+They include all needed dependencies and install everything into one directory. You can just download and run them, they will guide you through the installation.
+
+### 2. Installation with `pip` ###
 
 You can install **knossos_cuber** directly from Github by running
 
@@ -19,7 +24,7 @@ This should provide the executables `knossos_cuber` and `knossos_cuber_gui` on y
 Note: If you need to use a Python version older than 3.5, `pyqt5` has to be separately installed using your operating system's package manager (`apt`, `brew`, etc.).
 
 
-### 2. Running directly from the code directory ###
+### 3. Running directly from the code directory ###
 
 **knossos_cuber** depends on the following Python packages:
 
@@ -38,7 +43,7 @@ After downloading the source code from https://github.com/knossos-project/knosso
 Usage
 -----
 
-These usage examples assume that you have installed **knossos_cuber** with the first method ("system-wide installation").
+These usage examples assume that you have installed **knossos_cuber** with installation method **1.** or **2.**
 
 If you prefer to run the scripts directly out of the code folder, replace the following mentions of
 `knossos_cuber` by `python3 knossos_cuber.py` and
