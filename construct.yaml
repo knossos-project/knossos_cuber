@@ -7,6 +7,15 @@ channels:
 
 specs:
   - python >=3.6
+  - nomkl
   - knossos_cuber
+
+exclude:
+  - glib
+  - gstreamer
+  - gst-plugins-base
+  - libgcc
+  - libgfortran
+  - tk
 
 license_file: LICENSE
