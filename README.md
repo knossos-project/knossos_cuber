@@ -3,8 +3,8 @@ knossos_cuber
 
 A Python application that converts images into a **KNOSSOS**-readable format.
 
-Prerequisites
--------------
+Installation
+------------
 
 You can choose one of the following two installation methods:
 
@@ -13,7 +13,20 @@ You can choose one of the following two installation methods:
 We have published installers for Windows and Linux [here](https://github.com/knossos-project/knossos_cuber/releases/tag/v1-alpha2).
 They include all needed dependencies and install everything into one directory. You can just download and run them, they will guide you through the installation.
 
-### 2. Installation with `pip` ###
+### 2. Installation with `conda` ###
+
+If you are on Linux or Windows and have the [conda](https://conda.io/docs/) package manager (included in the [Anaconda](https://www.continuum.io/downloads) and [Miniconda](https://conda.io/miniconda.html) Python 3.6 distributions), you can install **knossos_cuber** into your default environment by running
+
+    conda config --add channels mdraw
+    conda install knossos_cuber
+
+If this doesn't work due to Python version conflicts or you just want to have a clean dedicated environment for **knossos_cuber**, you can install it into a new dedicated [conda env](https://conda.io/docs/using/envs.html) by running
+
+    conda config --add channels mdraw
+    conda create -n knossos_cuber knossos_cuber
+    conda activate knossos_cuber # Optionally run this to activate the environment and ensure all knossos_cuber executables are on your PATH
+
+### 3. Installation with `pip` ###
 
 You can install **knossos_cuber** directly from Github by running
 
@@ -24,7 +37,7 @@ This should provide the executables `knossos_cuber` and `knossos_cuber_gui` on y
 Note: If you need to use a Python version older than 3.5, `pyqt5` has to be separately installed using your operating system's package manager (`apt`, `brew`, etc.).
 
 
-### 3. Running directly from the code directory ###
+### 4. Running directly from the code directory ###
 
 **knossos_cuber** depends on the following Python packages:
 
@@ -43,11 +56,11 @@ After downloading the source code from https://github.com/knossos-project/knosso
 Usage
 -----
 
-These usage examples assume that you have installed **knossos_cuber** with installation method **1.** or **2.**
+These usage examples assume that you have installed **knossos_cuber** with installation method **1.**, **2.** or **3.**.
 
-If you prefer to run the scripts directly out of the code folder, replace the following mentions of
+(If you prefer to run the scripts directly out of the code folder, replace the following mentions of
 `knossos_cuber` by `python3 knossos_cuber.py` and
-`knossos_cuber_gui` by `python3 knossos_cuber_gui.py`, respectively.
+`knossos_cuber_gui` by `python3 knossos_cuber_gui.py`, respectively.)
 
 ### Commandline ###
 
