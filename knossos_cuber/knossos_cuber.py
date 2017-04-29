@@ -627,6 +627,22 @@ def write_cube(cube_data, prefix, cube_full_path):
     return
 
 
+def _natural_sort_key(s, _nsre=re.compile('([0-9]+)')):
+    """Key function for natural sorting.
+
+    E.g. this orders
+    '1.tif' < '2.tif' < ... < '10.tif' < '11.tif'
+    instead of the standard sort() order
+    '1.tif' < '10.tif' < '11.tif' < ... < '2.tif'
+
+    Fixes https://github.com/knossos-project/knossos_cuber/issues/3
+
+    http://stackoverflow.com/a/16090640
+    """
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split(_nsre, s)]
+
+
 def init_from_source_dir(config, log_fn):
     """Compute certain cubing parameters from the set of parameters
     specified by the user.
@@ -664,7 +680,7 @@ def init_from_source_dir(config, log_fn):
         sys.exit()
 
 
-    all_source_files.sort()
+    all_source_files.sort(key=_natural_sort_key)
 
 
     num_z = len(all_source_files)
