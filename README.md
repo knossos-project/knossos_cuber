@@ -24,7 +24,8 @@ If this doesn't work due to Python version conflicts or you just want to have a 
 
     conda config --add channels mdraw
     conda create -n knossos_cuber knossos_cuber
-    conda activate knossos_cuber # Optionally run this to activate the environment and ensure all knossos_cuber executables are on your PATH
+
+Optionally run `source activate knossos_cuber` (or `conda activate knossos_cuber` if you use the fish shell) to activate the environment and ensure all knossos_cuber executables are on your PATH.
 
 ### 3. Installation with `pip` ###
 
