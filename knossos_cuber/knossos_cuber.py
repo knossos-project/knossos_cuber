@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """A Python script that converts images into a **Knossos**-readable
@@ -44,6 +44,12 @@ try:
 except ImportError:
     from configparser import ConfigParser
 import argparse
+from shutil import copyfile
+
+from pathlib import Path
+
+#import libtiff
+#import tifffile
 
 # https://github.com/zimeon/iiif/issues/11
 Image.MAX_IMAGE_PIXELS = 1e10
@@ -55,20 +61,10 @@ SOURCE_FORMAT_FILES['png'] = ['png', 'PNG', '*.png']
 
 
 class InvalidCubingConfigError(Exception):
-    """An Exception object that is thrown whenever something goes wrong during
-    cubing.
-
-    """
-
     pass
 
 
 class DownsampleJobInfo(object):
-    """Class solely made to pass arguments to the downsample worker
-    pool easier.
-
-    """
-
     def __init__(self):
         self.src_cube_paths = []
         self.src_cube_local_coords = []
@@ -78,11 +74,6 @@ class DownsampleJobInfo(object):
 
 
 class CompressionJobInfo(object):
-    """Class solely made to pass arguments to the compression worker
-    pool easier.
-
-    """
-
     def __init__(self):
         self.src_cube_path = ''
         self.compressor = ''
@@ -90,7 +81,6 @@ class CompressionJobInfo(object):
         self.pre_gauss = 0.0
         self.open_jpeg_bin_path = ''
         self.cube_edge_len = 128
-
 
 
 def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
@@ -101,7 +91,6 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
                                  images.
         log_fn (function): A function that prints text.
     """
-
     all_cubes = []
     ref_time = time.time()
 
@@ -118,7 +107,6 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
     return all_cubes
 
 
-
 def write_knossos_conf(data_set_base_folder='',
                        scale=(10., 10., 25.),
                        boundary=(1000, 1000, 1000),
@@ -129,7 +117,7 @@ def write_knossos_conf(data_set_base_folder='',
     if not os.path.exists(data_set_base_folder):
         os.makedirs(data_set_base_folder)
 
-    with open(data_set_base_folder + 'knossos.conf', 'w') as conf_file:
+    with open(data_set_base_folder + '{0}.k.conf'.format(exp_name), 'w') as conf_file:
         conf_file.write("experiment name \"{0}\";\n".format(exp_name))
         conf_file.write("boundary x {0};\n".format(boundary[0]))
         conf_file.write("boundary y {0};\n".format(boundary[1]))
@@ -141,20 +129,14 @@ def write_knossos_conf(data_set_base_folder='',
 
     return
 
+
 def downsample_dataset(config, src_mag, trg_mag, log_fn):
-    """TODO
-    """
+    dataset_base_path = config.get('Project', 'target_path')
 
-    target_path = config.get('Project', 'target_path')
-    exp_name = config.get('Project', 'exp_name')
-
-    scaling = literal_eval(config.get('Dataset', 'scaling'))
-    boundaries = literal_eval(config.get('Dataset', 'boundaries'))
     num_workers = config.getint('Processing', 'num_downsampling_cores')
     buffer_size_in_cubes_downsampling = \
         config.getint('Processing', 'buffer_size_in_cubes_downsampling')
     num_io_threads = config.getint('Processing', 'num_io_threads')
-    dataset_base_path = config.get('Project', 'target_path')
 
     # check if src mag is available
     subdirs = [name
@@ -225,20 +207,15 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     log_fn("Downsampling to {0}".format(out_path))
 
     log_fn("Src dataset cube dimensions: x {0}, y {1}, z {2}"
-           .format(max_x, max_y, max_z))
+           .format(max_x+1, max_y+1, max_z+1))
 
     magf = float(trg_mag)
 
-    write_knossos_conf(
-        data_set_base_folder=target_path + '/mag' + str(trg_mag) + '/',
-        scale=(scaling[0] * magf,
-               scaling[1] * magf,
-               scaling[2] * magf),
-        boundary=(boundaries[0]//trg_mag,  #d int/int
-                  boundaries[1]//trg_mag,  #d int/int
-                  boundaries[2]//trg_mag), #d int/int
-        exp_name=exp_name + '_mag' + str(trg_mag),
-        mag=trg_mag)
+    # create dummy K conf for mag detection
+    magpath = dataset_base_path + '/mag' + str(trg_mag) + '/';
+    if not os.path.exists(magpath):
+        os.makedirs(magpath)
+    open(magpath + '/knossos.conf', 'w')
 
     # compile the 8 cubes that belong together, no overlap, set to 'bogus' at
     # the incomplete borders
@@ -269,6 +246,12 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
             config.getboolean('Processing', 'skip_already_cubed_layers')
         this_job_info.cube_edge_len = config.getint('Processing',
                                                     'cube_edge_len')
+        this_job_info.source_dtype = config.get('Dataset', 'source_dtype')
+        if this_job_info.source_dtype == 'numpy.uint16':
+            this_job_info.source_dtype = np.uint16
+        else:
+            this_job_info.source_dtype = np.uint8
+
 
         out_path = path_hash[(cur_x//2, cur_y//2, cur_z//2)]  #d int/int
         out_path = out_path.replace('mag'+str(src_mag), 'mag'+str(trg_mag))
@@ -384,7 +367,7 @@ def downsample_cube(job_info):
     skip_already_cubed_layers = job_info.skip_already_cubed_layers
 
     down_block = np.zeros([cube_edge_len*2, cube_edge_len*2, cube_edge_len*2],
-                          dtype=np.uint8,
+                          dtype=job_info.source_dtype,
                           order='F')
 
     if skip_already_cubed_layers:
@@ -414,7 +397,7 @@ def downsample_cube(job_info):
         content = fd.read(-1)
         fd.close()
 
-        this_cube = np.fromstring(content, dtype=np.uint8).reshape(
+        this_cube = np.fromstring(content, dtype=job_info.source_dtype).reshape(
             [cube_edge_len, cube_edge_len, cube_edge_len], order='F')
 
 
@@ -451,7 +434,7 @@ def downsample_cube(job_info):
     # for noisy images. On top of that, the gains of more sophisticated
     # filters become less clear, and data and scaling factor dependent.
     down_block = scipy.ndimage.interpolation.zoom(
-        down_block, 0.5, output=np.uint8,
+        down_block, 0.5, output=job_info.source_dtype,
         # 1: bilinear
         # 2: bicubic
         order=1,
@@ -691,6 +674,10 @@ def init_from_source_dir(config, log_fn):
     # assumed to have equal dimensions!
     test_img = Image.open(all_source_files[0])
     test_data = np.array(test_img)
+    
+    #test_data = tifffile.imread(all_source_files[0])
+    
+    #test_data = libtiff.TIFF.open(all_source_files[0]).read_image()
 
     # knossos uses swapped xy axes relative to images
     test_data = np.swapaxes(test_data, 0, 1)
@@ -698,6 +685,8 @@ def init_from_source_dir(config, log_fn):
     source_dims = test_data.shape
     config.set('Dataset', 'source_dims', str(test_data.shape))
     config.set('Dataset', 'source_dtype', str(test_data.dtype))
+    print(test_data.shape)
+    print(test_data.dtype)
 
     #q (important for division below!) Why getfloat, not getint? It is int in the config.ini and that would make more sense.
     cube_edge_len = config.getfloat('Processing', 'cube_edge_len')
@@ -805,15 +794,17 @@ def make_mag1_cubes_from_z_stack(config,
 
             # create a src binary copy mask to speed-up the following buffer-filling
             # process; this mask is made for the source_dims
-            #copy_mask_src = np.zeros([source_dims[0], source_dims[1]])
+            #if num_passes_per_cube_layer > 1:
+            #    copy_mask_src = np.zeros([source_dims[0], source_dims[1]], dtype=source_dtype)
 
             this_pass_x_start = cur_pass * num_x_cubes_per_pass * cube_edge_len
             this_pass_x_end = (cur_pass+1) * num_x_cubes_per_pass * cube_edge_len
             if this_pass_x_end > source_dims[0]:
                 this_pass_x_end = source_dims[0]
 
-            #copy_mask_src[this_pass_x_start:this_pass_x_end, :] = 1
-            #copy_mask_src = (copy_mask_src == 1)
+            #if num_passes_per_cube_layer > 1:
+            #    copy_mask_src[this_pass_x_start:this_pass_x_end, :] = 1
+            #    copy_mask_src = (copy_mask_src == 1)
 
             # create a trg binary copy mask to speed-up the following buffer-filling
             # process; this mask is made for the target buffer dims
@@ -922,7 +913,7 @@ def make_mag1_cubes_from_z_stack(config,
                     cube_data = this_layer_out_block[
                         :, x_start:x_end, y_start:y_end]
 
-                    cube_data = np.swapaxes(cube_data, 1, 2)
+                    #cube_data = np.swapaxes(cube_data, 1, 2)
 
                     prefix = os.path.normpath(os.path.abspath(
                         target_path + '/mag1' + '/x%04d/y%04d/z%04d/'
@@ -1014,18 +1005,16 @@ def knossos_cuber(config, log_fn):
 
         write_knossos_conf(dataset_base_path + "/", scale, boundaries, exp_name,
                            mag=1)
-        write_knossos_conf(dataset_base_path + "/mag1/", scale, boundaries, exp_name,
-                           mag=1)
+        open(dataset_base_path + "/mag1/knossos.conf", 'w') # only write dummy for mag detection
 
         total_mag1_time = time.time() - mag1_ref_time
 
         log_fn("Mag 1 succesfully cubed. Took {0} h"
                .format(total_mag1_time/3600)) #d f/i
 
-
     if config.getboolean('Processing', 'perform_downsampling'):
         total_down_ref_time = time.time()
-        curr_mag = 2 #q mags are always ints, right? (important for division below!)
+        curr_mag = 2  # q mags are always ints, right? (important for division below!)
 
         # `mags_to_gen' is specified like `2**20' in the configuration file.
         # To parse this number, the string has to be split at `**',
@@ -1058,7 +1047,6 @@ def knossos_cuber(config, log_fn):
     log_fn('All done.')
 
 
-
 def validate_config(config):
     """Validates the configuration file by checking two conditions:
 
@@ -1079,9 +1067,10 @@ def validate_config(config):
     perform_mag1_cubing = config.getboolean('Processing',
                                             'perform_mag1_cubing')
 
-    if not perform_mag1_cubing and not config.get('Dataset', 'boundaries'):
-        raise InvalidCubingConfigError("When starting from mag1 cubes, the "
-                                       "dataset boundaries must be specified.")
+    # not true !!!
+    #if not perform_mag1_cubing and not config.get('Dataset', 'boundaries'):
+    #    raise InvalidCubingConfigError("When starting from mag1 cubes, the "
+    #                                   "dataset boundaries must be specified.")
 
     # This validation only takes place for RAW files.
     # However, support for RAW files is not implemented yet.
@@ -1093,7 +1082,6 @@ def validate_config(config):
                                            "must be specified.")
 
     return True
-
 
 
 def read_config_file(config_file):
@@ -1120,7 +1108,6 @@ def read_config_file(config_file):
         sys.exit()
 
     return config
-
 
 
 def create_parser():
@@ -1173,7 +1160,6 @@ def create_parser():
     return parser
 
 
-
 def validate_args(args):
     """Check whether the format specified from the command-line is a
     supported format.
@@ -1186,7 +1172,7 @@ def validate_args(args):
         True if arguments are alright.
     """
 
-    if args.format not in SOURCE_FORMAT_FILES.keys():
+    if args.format is not None and args.format not in SOURCE_FORMAT_FILES.keys():
         print("Error: " + args.format + " was not found in the list of supported formats!")
         return False
 
@@ -1200,6 +1186,10 @@ def main():
     if not validate_args(ARGS):
         sys.exit()
 
+    if ARGS.config is not None:
+        config_file = Path("config.ini")
+        if not config_file.is_file():
+            copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "config.ini"), config_file)
     CONFIG = read_config_file(ARGS.config)
 
     CONFIG.set('Project', 'source_path', ARGS.source_dir)
@@ -1208,6 +1198,7 @@ def main():
 
     if validate_config(CONFIG):
         knossos_cuber(CONFIG, lambda x: sys.stdout.write(str(x) + '\n'))
+
 
 if __name__ == '__main__':
     main()
