@@ -94,13 +94,20 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
     all_cubes = []
     ref_time = time.time()
 
-    for root, _, files in os.walk(dataset_base_path):
-        #if len(files) > 1:
-            #print
-            # either overlay cubes or different compressions found
-        for cur_file in files:
-            if '.raw' in cur_file:
-                all_cubes.append(os.path.join(root, cur_file))
+    x_count = len([name for name in os.listdir(dataset_base_path) if os.path.isdir(os.path.join(dataset_base_path, name))])
+    y_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", name))])
+    z_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000", "y0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", "y0000", name))])
+
+    mag = int(re.compile(r'.*mag(?P<magID>\d+)').search(dataset_base_path).group('magID'))
+
+    real_base = dataset_base_path.split("/mag")[0]
+    print(real_base)
+    for x in range(0, x_count):
+        for y in range(0, y_count):
+            for z in range(0, z_count):
+                all_cubes.append(get_cube_fname(real_base, "AOB2014NA", mag, x, y, z))
+
+    print("{0} {1} {2}: {3}".format(x_count, y_count, z_count, len(all_cubes)))
 
     log_fn("Cube listing took: {0} s".format(time.time()-ref_time))
 
@@ -128,6 +135,18 @@ def write_knossos_conf(data_set_base_folder='',
         conf_file.write("magnification {0};\n".format(mag))
 
     return
+
+
+def get_cube_fname(basepath, expname, mag, x, y, z):
+    fname = '{basepath}/mag{mag}/x{x:04d}/y{y:04d}/z{z:04d}/{expname}_mag{mag}_x{x:04d}_y{y:04d}_z{z:04d}.png'.format(
+                **{'basepath': basepath,
+                   'x': x,
+                   'y': y,
+                   'z': z,
+                   'expname': expname,
+                   'mag': mag})
+
+    return fname
 
 
 def downsample_dataset(config, src_mag, trg_mag, log_fn):
