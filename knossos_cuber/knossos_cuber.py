@@ -535,7 +535,7 @@ def compress_dataset(config, log_fn):
     worker_pool.join()
 
 
-def compress_cube(job_info):
+def compress_cube(job_info, cube_raw = None):
     """TODO
     """
 
@@ -562,7 +562,8 @@ def compress_cube(job_info):
         fadvise.willneed(job_info.src_cube_path)
 
     if job_info.compressor == 'jpeg':
-        cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
+        if cube_raw is None:
+            cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
 
         cube_raw = cube_raw.reshape(cube_edge_len * cube_edge_len,
                                     cube_edge_len)
@@ -599,9 +600,9 @@ def compress_cube(job_info):
 
     # print here, not log_fn, because log_fn may not be able to write to some
     # data structure from multiple processes.
-    compress_cube.log_queue.put("Compress, writing of {0} took: {1} s"
-                                .format(job_info.src_cube_path,
-                                        time.time() - ref_time))
+#    compress_cube.log_queue.put("Compress, writing of {0} took: {1} s"
+#                                .format(job_info.src_cube_path,
+#                                        time.time() - ref_time))
 
     return
 
@@ -611,6 +612,20 @@ def compress_cube_init(log_queue):
     """
 
     compress_cube.log_queue = log_queue
+
+
+def write_compressed_cube(config, cube_data, prefix, cube_full_path):
+    if not os.path.exists(prefix):
+        os.makedirs(prefix)
+
+    this_job_info = CompressionJobInfo()
+
+    this_job_info.compressor = config.get('Compression', 'compression_algo')
+    this_job_info.quality_or_ratio = config.getint('Compression', 'out_comp_quality')
+    this_job_info.src_cube_path = cube_full_path
+    this_job_info.pre_gauss = config.getfloat('Compression', 'pre_comp_gauss_filter')
+
+    compress_cube(this_job_info, cube_data)
 
 
 def write_cube(cube_data, prefix, cube_full_path):
