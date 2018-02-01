@@ -168,7 +168,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
 
     # -> extract x,y,z src dataset dimensions in cubes
     cube_coord_matcher = re.compile(r'.*x(?P<x>\d+)_y(?P<y>\d+)_z('
-                                    r'?P<z>\d+)\.raw$')
+                                    r'?P<z>\d+)\.(raw|png)$')
 
     max_x = 0
     max_y = 0
@@ -208,8 +208,6 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
 
     log_fn("Src dataset cube dimensions: x {0}, y {1}, z {2}"
            .format(max_x+1, max_y+1, max_z+1))
-
-    magf = float(trg_mag)
 
     # create dummy K conf for mag detection
     magpath = dataset_base_path + '/mag' + str(trg_mag) + '/';
@@ -390,21 +388,23 @@ def downsample_cube(job_info):
         # faster on our cluster
         content = ''
         #buffersize=131072*2
-        fd = io.open(path_to_src_cube, 'rb')
+        #fd = io.open(path_to_src_cube, 'rb')
                     # buffering = buffersize)
         #for i in range(0, (cube_edge_len**3 / buffersize) + 1):
         #    content += fd.read(buffersize)
-        content = fd.read(-1)
-        fd.close()
+        #content = fd.read(-1)
+        #fd.close()
 
-        this_cube = np.fromstring(content, dtype=job_info.source_dtype).reshape(
-            [cube_edge_len, cube_edge_len, cube_edge_len], order='F')
+        #this_cube = np.fromstring(content, dtype=job_info.source_dtype).reshape(
+        #    [cube_edge_len, cube_edge_len, cube_edge_len])
 
+        this_cube = np.array(Image.open(path_to_src_cube)).reshape(
+            [cube_edge_len, cube_edge_len, cube_edge_len])
 
         #this_cube = np.fromfile(path_to_src_cube, dtype=np.uint8).reshape([
         #    cube_edge_len,cube_edge_len,cube_edge_len], order='F')
 
-        this_cube = np.swapaxes(this_cube, 0, 2)
+        #this_cube = np.swapaxes(this_cube, 0, 2)
         #this_cube = np.swapaxes(this_cube, 1, 2)
 
         down_block[src_coord[2]*cube_edge_len:\
