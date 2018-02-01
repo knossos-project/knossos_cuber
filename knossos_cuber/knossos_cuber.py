@@ -622,7 +622,7 @@ def write_cube(cube_data, prefix, cube_full_path):
         os.makedirs(prefix)
 
     try:
-        cube_data.tofile(cube_full_path)
+        cube_data.tofile(os.path.splitext(cube_full_path)[0] + '.raw')
         #print("writing took: {0}s".format(time.time()-ref_time))
     except IOError:
         # no log_fn due to multithreading
