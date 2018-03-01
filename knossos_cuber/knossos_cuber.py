@@ -1066,11 +1066,11 @@ def knossos_cuber(config, log_fn):
                              mags_to_gen_string.split("**"))
 
         while curr_mag <= mags_to_gen:
-            worked = downsample_dataset(config, curr_mag//2, curr_mag, log_fn) #d int/int
+            worked = downsample_dataset(config, curr_mag - 1, curr_mag, log_fn) #d int/int
 
             if worked:
                 log_fn("Mag {0} succesfully cubed.".format(curr_mag))
-                curr_mag *= 2
+                curr_mag += 1
             else:
                 log_fn("Done with downsampling.")
                 break
