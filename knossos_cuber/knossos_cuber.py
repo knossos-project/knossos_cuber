@@ -237,6 +237,9 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     # compile the 8 cubes that belong together, no overlap, set to 'bogus' at
     # the incomplete borders
 
+    job_prep_time = time.time()
+    log_fn("Preparing jobs…")
+
     downsampling_job_info = []
     for cur_x, cur_y, cur_z in itertools.product(range(0, max_x+2, 2),
                                                  range(0, max_y+2, 2),
@@ -295,12 +298,19 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     else:
         chunked_jobs = [downsampling_job_info]
 
+    log_fn("{0} todo, {1} chunks".format(len(downsampling_job_info), len(chunked_jobs)))
+
     log_queue = multiprocessing.Queue()
 
-    for this_job_chunk in chunked_jobs:
+    job_prep_time = time.time() - job_prep_time
+    log_fn("Job preparation took {0} s".format(job_prep_time))
+
+    for chunk_id, this_job_chunk in enumerate(chunked_jobs):
+        chunk_time = time.time()
+
         log_fn("Starting {0} workers...".format(num_workers))
-        log_fn("First cube in this chunk: {0}"
-               .format(this_job_chunk[0].trg_cube_path))
+        log_fn("First cube (of {0}) in chunk {1} (of {2}): {3}"
+               .format(len(this_job_chunk), chunk_id, len(chunked_jobs), this_job_chunk[0].trg_cube_path))
 
         ref_time = time.time()
         worker_pool = multiprocessing.Pool(num_workers,
@@ -308,6 +318,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                                            [log_queue])
         #worker_pool = multiprocessing_threads.Pool(num_workers)
 
+        log_fn("Downsampling…")
         cubes = worker_pool.map(downsample_cube, this_job_chunk, chunksize=10)
         worker_pool.close()
 
@@ -318,21 +329,20 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
 
         worker_pool.join()
 
-        log_fn("Downsampling took on avg per cube: {0} s"
-               .format((time.time() - ref_time) / len(this_job_chunk))) #d float/int
+        log_fn("Downsampling took {0} s (on avg per cube {1} s)"
+               .format(time.time() - ref_time
+               , (time.time() - ref_time) / len(this_job_chunk))) #d float/int
 
-        write_times = []
+        log_fn("Writing (and compressing)…")
         write_threads = []
-
+        cube_write_time = time.time()
         # start writing the cubes
         for cube_data, job_info in zip(cubes, this_job_chunk):
             prefix = os.path.dirname(job_info.trg_cube_path)
             cube_full_path = job_info.trg_cube_path
-            ref_time = time.time()
 
             if isinstance(cube_data, str) and cube_data == 'skipped':
-                write_times.append(time.time()-ref_time)
-                #print("Skipped cube {0}".format(job_info.trg_cube_path))
+                print("Skipped cube {0}".format(job_info.trg_cube_path))
                 continue
 
             # One could also try multiprocessing or multiprocessing dummy
@@ -356,13 +366,16 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                 write_threads.append(this_thread)
                 this_thread.start()
 
-            write_times.append(time.time() - ref_time)
-
-        log_fn("Writing took on avg per cube: {0} s"
-               .format(np.mean(write_times)))
-
         # wait until all writes are finished
         [x.join() for x in write_threads]
+
+        cube_write_time = time.time() - cube_write_time
+        log_fn("Writing took {0} s (on avg per cube {1} s)"
+               .format(cube_write_time, cube_write_time / len(this_job_chunk)))
+
+        chunk_time = time.time() - chunk_time
+        log_fn("Processing chunk took {0} s (on avg per cube {1} s)"
+               .format(chunk_time, chunk_time / len(this_job_chunk)))
 
     #raise()
     return True
@@ -376,7 +389,6 @@ def downsample_cube(job_info):
             An object that holds data required for downsampling.
     """
 
-    ref_time = time.time()
     # the first cube in the list contains the new coordinate of the created
     # downsampled out-cube
 
@@ -466,10 +478,6 @@ def downsample_cube(job_info):
     # extract directory of out_path
     #if not os.path.exists(os.path.dirname(job_info.trg_cube_path)):
     #    os.makedirs(os.path.dirname(job_info.trg_cube_path))
-
-    downsample_cube.log_queue.put("Downsampling took: {0} s for {1}"
-                                  .format(time.time() - ref_time,
-                                          job_info.trg_cube_path))
 
     #down_block.tofile(job_info.trg_cube_path)
 
