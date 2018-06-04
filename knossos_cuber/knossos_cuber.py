@@ -1054,6 +1054,12 @@ def knossos_cuber(config, log_fn):
         log_fn("Mag 1 succesfully cubed. Took {0} h"
                .format(total_mag1_time/3600)) #d f/i
 
+    knossos_mag_names = config.get('Dataset', 'mag_names', fallback="knossos").lower() == "knossos"
+    if knossos_mag_names:
+        log_fn("using KNOSSOS mag names (1, 2, 4, 8, 16…)")
+    else:
+        log_fn("using consecutive mag names (1, 2, 3, 4, 5…)")
+
     if config.getboolean('Processing', 'perform_downsampling'):
         total_down_ref_time = time.time()
         curr_mag = 2  # q mags are always ints, right? (important for division below!)
@@ -1066,11 +1072,18 @@ def knossos_cuber(config, log_fn):
                              mags_to_gen_string.split("**"))
 
         while curr_mag <= mags_to_gen:
-            worked = downsample_dataset(config, curr_mag - 1, curr_mag, log_fn) #d int/int
+            if knossos_mag_names:
+                prev_mag = curr_mag // 2
+            else:
+                prev_mag = curr_mag - 1
+            worked = downsample_dataset(config, prev_mag, curr_mag, log_fn) #d int/int
 
             if worked:
                 log_fn("Mag {0} succesfully cubed.".format(curr_mag))
-                curr_mag += 1
+                if knossos_mag_names:
+                    curr_mag *= 2
+                else:
+                    curr_mag += 1
             else:
                 log_fn("Done with downsampling.")
                 break
