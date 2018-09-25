@@ -48,6 +48,8 @@ from shutil import copyfile
 
 from pathlib import Path
 
+import skimage.transform
+
 #import libtiff
 #import tifffile
 
@@ -66,9 +68,11 @@ class InvalidCubingConfigError(Exception):
 
 class DownsampleJobInfo(object):
     def __init__(self):
+        self.from_raw = True
         self.src_cube_paths = []
         self.src_cube_local_coords = []
         self.trg_cube_path = ''
+        self.trg_cube_path2 = ''
         self.cube_edge_len = 128
         self.skip_already_cubed_layers = False
 
@@ -92,26 +96,58 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
         log_fn (function): A function that prints text.
     """
     all_cubes = []
-    ref_time = time.time()
 
-    x_count = len([name for name in os.listdir(dataset_base_path) if os.path.isdir(os.path.join(dataset_base_path, name))])
-    y_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", name))])
-    z_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000", "y0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", "y0000", name))])
+    zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000");
+    if os.path.exists(zero_dir):
+        found_cube_files = os.listdir(zero_dir)
+    else:
+        found_cube_files = []
+        ref_time = time.time()
+        for root, _, files in os.walk(dataset_base_path):
+            if len(files) > 1:
+                print("either overlay cubes or different compressions found")
+            for cur_file in files:
+                if not os.path.basename(cur_file) == "knossos.conf":
+                    all_cubes.append(os.path.join(root, cur_file))
+            # if len(all_cubes) > 100:
+            #     break
+        found_cube_files.append(all_cubes[0])
+        log_fn("Cube listing took: {0} s".format(time.time()-ref_time))
 
-    mag = int(re.compile(r'.*mag(?P<magID>\d+)').search(dataset_base_path).group('magID'))
+    print(found_cube_files[0])
+    experimentname = re.compile(r"(?P<experimentname>.*)_mag.*\.(?P<extension>\w)").search(os.path.basename(found_cube_files[0])).group("experimentname")
+    log_fn("extracted experiment name: »{0}«".format(experimentname))
 
-    real_base = dataset_base_path.split("/mag")[0]
-    print(real_base)
-    for x in range(0, x_count):
-        for y in range(0, y_count):
-            for z in range(0, z_count):
-                all_cubes.append(get_cube_fname(real_base, "AOB2014NA", mag, x, y, z))
+    from_raw = None
+    for file in found_cube_files:
+        extension = os.path.splitext(file)[1].lower()
+        if extension == ".raw":
+            from_raw = os.stat(os.path.join(dataset_base_path, "x0000", "y0000", "z0000", file)).st_size
+            break
+        if extension != ".jpg" and extension != ".jpeg":
+            break
 
-    print("{0} {1} {2}: {3}".format(x_count, y_count, z_count, len(all_cubes)))
+    log_fn("using {0}".format(extension))
 
-    log_fn("Cube listing took: {0} s".format(time.time()-ref_time))
+    if os.path.exists(zero_dir):
+        mag = int(re.compile(r'.*mag(?P<magID>\d+)').search(dataset_base_path).group('magID'))
 
-    return all_cubes
+        x_count = len([name for name in os.listdir(dataset_base_path) if os.path.isdir(os.path.join(dataset_base_path, name))])
+        y_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", name))])
+        z_count = len([name for name in os.listdir(os.path.join(dataset_base_path, "x0000", "y0000")) if os.path.isdir(os.path.join(dataset_base_path, "x0000", "y0000", name))])
+
+        real_base = dataset_base_path.split("/mag")[0]
+        print(real_base)
+        for x in range(0, x_count):
+            for y in range(0, y_count):
+                for z in range(0, z_count):
+                    all_cubes.append(get_cube_fname(real_base, experimentname, mag, x, y, z, extension)) # todo
+
+        print("{0} {1} {2}: {3}".format(x_count, y_count, z_count, len(all_cubes)))
+    else:
+        print("{0} cubes".format(len(all_cubes)))
+
+    return from_raw, all_cubes
 
 
 def write_knossos_conf(data_set_base_folder='',
@@ -137,16 +173,15 @@ def write_knossos_conf(data_set_base_folder='',
     return
 
 
-def get_cube_fname(basepath, expname, mag, x, y, z):
-    fname = '{basepath}/mag{mag}/x{x:04d}/y{y:04d}/z{z:04d}/{expname}_mag{mag}_x{x:04d}_y{y:04d}_z{z:04d}.png'.format(
+def get_cube_fname(basepath, expname, mag, x, y, z, extension):
+    return '{basepath}/mag{mag}/x{x:04d}/y{y:04d}/z{z:04d}/{expname}_mag{mag}_x{x:04d}_y{y:04d}_z{z:04d}{extension}'.format(
                 **{'basepath': basepath,
                    'x': x,
                    'y': y,
                    'z': z,
                    'expname': expname,
-                   'mag': mag})
-
-    return fname
+                   'mag': mag,
+                   'extension': extension})
 
 
 def downsample_dataset(config, src_mag, trg_mag, log_fn):
@@ -179,15 +214,29 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         raise Exception("The src mag folder could not be found in the base "
                         "path folder.")
 
-    log_fn("Analysing source dataset...")
+    log_fn("Analysing source dataset... (mag{0})".format(src_mag))
 
     # we walk through the dataset structure and collect all available cubes
-    all_cubes = get_list_of_all_cubes_in_dataset(
+    from_raw, all_cubes = get_list_of_all_cubes_in_dataset(
         dataset_base_path + '/' + found_mags[src_mag], log_fn)
+
+    cube_edge_len = config.getint('Processing', 'cube_edge_len')
+
+    source_dtype = None
+    if 'source_dtype' in config['Dataset']:
+        #if config.get('Dataset', 'source_dtype') == '':
+        source_dtype = np.uint8 # todo
+    elif from_raw is not None:
+        if from_raw / cube_edge_len ** 3 == 2:
+            log_fn("from 16 bit raw")
+            source_dtype = np.uint16
+        else:
+            log_fn("from 8 bit raw")
+            source_dtype = np.uint8
 
     # -> extract x,y,z src dataset dimensions in cubes
     cube_coord_matcher = re.compile(r'.*x(?P<x>\d+)_y(?P<y>\d+)_z('
-                                    r'?P<z>\d+)\.(raw|png)$')
+                                    r'?P<z>\d+)\.(jpg|png|raw)$')
 
     max_x = 0
     max_y = 0
@@ -217,7 +266,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         if z > max_z:
             max_z = int(mobj.group('z'))
 
-    if max_x < 4 and max_y < 4 and max_z < 4:
+    if max_x <= 2 and max_y <= 2 and max_z <= 2:
         # nothing to downsample, stopping
         log_fn("Further downsampling is useless, stopping.")
         return False
@@ -240,7 +289,10 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     job_prep_time = time.time()
     log_fn("Preparing jobs…")
 
+    experimentname = re.compile(r"(?P<experimentname>.*)_mag.*\.(?P<extension>\w)").search(os.path.basename(all_cubes[0])).group("experimentname")
+
     downsampling_job_info = []
+    skipped_count = 0
     for cur_x, cur_y, cur_z in itertools.product(range(0, max_x+2, 2),
                                                  range(0, max_y+2, 2),
                                                  range(0, max_z+2, 2)):
@@ -253,33 +305,41 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         for lx, ly, lz in itertools.product([0, 1], [0, 1], [0, 1]):
 
             # fill up the borders with black
-            if (cur_x+lx, cur_y+ly, cur_z+lz) not in path_hash:
-                path_hash[(cur_x+lx, cur_y+ly, cur_z+lz)] = 'bogus'
+            pos = (cur_x + lx, cur_y + ly, cur_z + lz)
+            if pos not in path_hash:
+                path_hash[pos] = 'bogus'
 
-            these_cubes.append(path_hash[(cur_x + lx, cur_y + ly, cur_z + lz)])
+            these_cubes.append(path_hash[pos])
             these_cubes_local_coords.append((lx, ly, lz))
 
+        if all(elem == 'bogus' for elem in these_cubes):
+            continue
+
         this_job_info = DownsampleJobInfo()
+        this_job_info.from_raw = from_raw is not None
         this_job_info.src_cube_paths = these_cubes
         this_job_info.src_cube_local_coords = these_cubes_local_coords
-        this_job_info.skip_already_cubed_layers = \
-            config.getboolean('Processing', 'skip_already_cubed_layers')
-        this_job_info.cube_edge_len = config.getint('Processing',
-                                                    'cube_edge_len')
-        this_job_info.source_dtype = config.get('Dataset', 'source_dtype')
-        if this_job_info.source_dtype == 'numpy.uint16':
-            this_job_info.source_dtype = np.uint16
+        this_job_info.cube_edge_len = cube_edge_len
+        this_job_info.source_dtype = source_dtype
+
+        # out_path = out_path.replace('mag'+str(src_mag), 'mag'+str(trg_mag))
+        extension = ".jpg"
+        this_job_info.trg_cube_path = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z // 2, extension)  #d int/int
+        if trg_mag < 2: # TODO
+            this_job_info.trg_cube_path = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z, extension)  #d int/int
+            this_job_info.trg_cube_path2 = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z + 1, extension)  #d int/int
+
+        if config.getboolean('Processing', 'skip_already_cubed_layers') and (\
+                os.path.exists(this_job_info.trg_cube_path) and 
+                #os.path.exists(this_job_info.trg_cube_path.replace("png", "jpg"))\
+                (trg_mag >= 4 or os.path.exists(this_job_info.trg_cube_path2))):
+                #and os.path.exists(this_job_info.trg_cube_path2.replace("png", "jpg"))):
+            #log_fn("path exists: {0}".format(this_job_info.trg_cube_path.replace("png", "{png,jpg}")))
+            skipped_count += 1
         else:
-            this_job_info.source_dtype = np.uint8
-
-
-        out_path = path_hash[(cur_x//2, cur_y//2, cur_z//2)]  #d int/int
-        out_path = out_path.replace('mag'+str(src_mag), 'mag'+str(trg_mag))
-        this_job_info.trg_cube_path = out_path
-
-        downsampling_job_info.append(this_job_info)
-
-    #downsample_cube(downsampling_job_info[0])
+            #log_fn("not path exists: {0}".format(this_job_info.trg_cube_path))
+            #log_fn("not path exists: {0}".format(this_job_info.trg_cube_path2))
+            downsampling_job_info.append(this_job_info)
 
     # Split up the downsampling into chunks that can be hold in memory. This
     # allows us to separate reading and writing from the storage,
@@ -298,14 +358,33 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
     else:
         chunked_jobs = [downsampling_job_info]
 
-    log_fn("{0} todo, {1} chunks".format(len(downsampling_job_info), len(chunked_jobs)))
+    log_fn("{0} todo, {1} chunks, {2} total".format(len(downsampling_job_info), len(chunked_jobs), len(downsampling_job_info) + skipped_count))
+
+    if len(downsampling_job_info) == 0:
+        return True
 
     log_queue = multiprocessing.Queue()
 
     job_prep_time = time.time() - job_prep_time
     log_fn("Job preparation took {0} s".format(job_prep_time))
 
+    # for job in chunked_jobs[0]:
+    #     for path in job.src_cube_paths:
+    #         path2 = path.replace("/run/media/npfeiler/", "/mnt/ariadne02/projects/sromp-1-pytr/")
+    #         print("cp -v {0} {1}".format(path2, path))
+    # for job in chunked_jobs[1]:
+    #     for path in job.src_cube_paths:
+    #         path2 = path.replace("/run/media/npfeiler/", "/mnt/ariadne02/projects/sromp-1-pytr/")
+    #         print("cp -v {0} {1}".format(path2, path))
+    # exit(0)
+
     for chunk_id, this_job_chunk in enumerate(chunked_jobs):
+    #if True:
+    #    chunk_id = 2*len(chunked_jobs)//3
+    #    this_job_chunk = chunked_jobs[chunk_id]
+        #if trg_mag == 2 and chunk_id < 125:
+        #    continue
+
         chunk_time = time.time()
 
         log_fn("Starting {0} workers...".format(num_workers))
@@ -338,31 +417,41 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         cube_write_time = time.time()
         # start writing the cubes
         for cube_data, job_info in zip(cubes, this_job_chunk):
-            prefix = os.path.dirname(job_info.trg_cube_path)
-            cube_full_path = job_info.trg_cube_path
+            # for chunk in this_job_chunk:
+            #     if chunk.trg_cube_path != 'bogus':
+            #         prefix = os.path.dirname(chunk.trg_cube_path)
+            #         break
 
             if cube_data is None:
                 print("Skipped cube {0}".format(job_info.trg_cube_path))
                 continue
 
-            # One could also try multiprocessing or multiprocessing dummy
-            if threading.active_count() < num_io_threads:
-                this_thread = threading.Thread(target=write_cube,
-                                               args=[cube_data,
-                                                     prefix,
-                                                     cube_full_path])
-
-                write_threads.append(this_thread)
-                this_thread.start()
-
+            if job_info.trg_cube_path2 is not '':
+                first_cube = cube_data[0:128, :, :]
+                second_cube = cube_data[128:256, :, :]
             else:
+                first_cube = cube_data
+
+            # print(cube_data.shape, first_cube.shape, second_cube.shape)
+            # exit(0)
+
+            # One could also try multiprocessing or multiprocessing dummy
+            if threading.active_count() >= num_io_threads:
                 while threading.active_count() >= num_io_threads:
                     time.sleep(0.001)
-                this_thread = threading.Thread(target=write_cube,
-                                               args=[cube_data,
-                                                     prefix,
-                                                     cube_full_path])
-
+            this_thread = threading.Thread(target=write_compressed_cube,
+                                           args=[config,
+                                                 first_cube,
+                                                 os.path.dirname(job_info.trg_cube_path),
+                                                 job_info.trg_cube_path])
+            write_threads.append(this_thread)
+            this_thread.start()
+            if job_info.trg_cube_path2 is not '':
+                this_thread = threading.Thread(target=write_compressed_cube,
+                                               args=[config,
+                                                     second_cube,
+                                                     os.path.dirname(job_info.trg_cube_path2),
+                                                     job_info.trg_cube_path2])
                 write_threads.append(this_thread)
                 this_thread.start()
 
@@ -370,14 +459,17 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         [x.join() for x in write_threads]
 
         cube_write_time = time.time() - cube_write_time
-        log_fn("Writing took {0} s (on avg per cube {1} s)"
-               .format(cube_write_time, cube_write_time / len(this_job_chunk)))
-
         chunk_time = time.time() - chunk_time
-        log_fn("Processing chunk took {0} s (on avg per cube {1} s)"
-               .format(chunk_time, chunk_time / len(this_job_chunk)))
 
-    #raise()
+        if len(write_threads) > 0:
+            log_fn("Writing {0} cubes took {1} s (on avg {2} s per cube)"
+                   .format(len(write_threads), cube_write_time, cube_write_time / len(write_threads)))
+
+            log_fn("Processing chunk took {0} s (on avg per cube {1} s)"
+                   .format(chunk_time, chunk_time / len(this_job_chunk)))
+        else:
+            log_fn("Skipped complete chunk in {0} s".format(chunk_time))
+
     return True
 
 
@@ -393,16 +485,9 @@ def downsample_cube(job_info):
     # downsampled out-cube
 
     cube_edge_len = job_info.cube_edge_len
-    skip_already_cubed_layers = job_info.skip_already_cubed_layers
 
     down_block = np.zeros([cube_edge_len*2, cube_edge_len*2, cube_edge_len*2],
-                          dtype=job_info.source_dtype,
-                          order='F')
-
-    if skip_already_cubed_layers:
-        if os.path.exists(job_info.trg_cube_path):
-            if os.path.getsize(job_info.trg_cube_path) == cube_edge_len**3:
-                return None
+                          dtype=job_info.source_dtype)
 
     if FADVISE_AVAILABLE:
         for src_path in job_info.src_cube_paths:
@@ -410,43 +495,52 @@ def downsample_cube(job_info):
 
         #time.sleep(0.2)
 
+    skipped_count = 0
     for path_to_src_cube, src_coord in zip(job_info.src_cube_paths,
                                            job_info.src_cube_local_coords):
         if path_to_src_cube == 'bogus':
             continue
 
-        # Yes, I know the numpy fromfile function - this is significantly
-        # faster on our cluster
-        content = ''
-        #buffersize=131072*2
-        #fd = io.open(path_to_src_cube, 'rb')
-                    # buffering = buffersize)
-        #for i in range(0, (cube_edge_len**3 / buffersize) + 1):
-        #    content += fd.read(buffersize)
-        #content = fd.read(-1)
-        #fd.close()
+        if job_info.from_raw:
+            # Yes, I know the numpy fromfile function - this is significantly
+            # faster on our cluster
+            content = ''
+            # buffersize=131072*2
+            fd = io.open(path_to_src_cube, 'rb')
+            #             # buffering = buffersize)
+            # for i in range(0, (cube_edge_len**3 / buffersize) + 1):
+            #    content += fd.read(buffersize)
+            content = fd.read(-1)
+            fd.close()
+            this_cube = np.fromstring(content, dtype=job_info.source_dtype)
+            # this_cube = np.fromfile(path_to_src_cube, dtype=job_info.source_dtype)
+        else:
+            # this_cube = np.array(Image.open(io.BytesIO(content)))
+            try:
+                this_cube = np.array(Image.open(path_to_src_cube))
+            except:
+                skipped_count += 1
+                continue
 
-        #this_cube = np.fromstring(content, dtype=job_info.source_dtype).reshape(
-        #    [cube_edge_len, cube_edge_len, cube_edge_len])
-
-        this_cube = np.array(Image.open(path_to_src_cube)).reshape(
-            [cube_edge_len, cube_edge_len, cube_edge_len])
-
-        #this_cube = np.fromfile(path_to_src_cube, dtype=np.uint8).reshape([
-        #    cube_edge_len,cube_edge_len,cube_edge_len], order='F')
+        try:
+            this_cube = this_cube.reshape([cube_edge_len, cube_edge_len, cube_edge_len])
+        except Exception as e:
+            print(path_to_src_cube)
+            raise
 
         #this_cube = np.swapaxes(this_cube, 0, 2)
         #this_cube = np.swapaxes(this_cube, 1, 2)
 
-        down_block[src_coord[2]*cube_edge_len:\
-                   src_coord[2]*cube_edge_len+cube_edge_len,
-                   src_coord[1]*cube_edge_len:\
-                   src_coord[1]*cube_edge_len+cube_edge_len,
-                   src_coord[0]*cube_edge_len:\
-                   src_coord[0]*cube_edge_len+cube_edge_len] = this_cube
+        down_block[src_coord[2]*cube_edge_len:src_coord[2]*cube_edge_len + cube_edge_len,
+                   src_coord[1]*cube_edge_len:src_coord[1]*cube_edge_len + cube_edge_len,
+                   src_coord[0]*cube_edge_len:src_coord[0]*cube_edge_len + cube_edge_len]\
+            = this_cube
 
         #down_block = np.swapaxes(down_block, 0, 1)
     #raise()
+
+    if skipped_count == 8:
+        return None
 
     # It is not clear to me whether this zooming function does actually the
     # right thing. One should
@@ -464,16 +558,34 @@ def downsample_cube(job_info):
     # re-sampling without any filtering), especially
     # for noisy images. On top of that, the gains of more sophisticated
     # filters become less clear, and data and scaling factor dependent.
+    if job_info.trg_cube_path2 is not '':
+        zoom = [1.0, 0.5, 0.5]
+    else:
+        zoom = 0.5
     down_block = scipy.ndimage.interpolation.zoom(
-        down_block, 0.5, output=job_info.source_dtype,
+        down_block, zoom,
+        output=job_info.source_dtype,
         # 1: bilinear
         # 2: bicubic
         order=1,
         # this does not mean nearest interpolation, it corresponds to how the
-        # borders are treated.
-        mode='nearest',
-        # treat the borders.
-        prefilter=True)
+        # borders (out of bounds) are treated.
+        mode='nearest'
+        # cval=0.0,
+        )
+    # for i in range(0, down_block.shape[0]):
+    #     down_block[i] = scipy.ndimage.gaussian_filter(
+    #         down_block[i],
+    #         sigma=0.35 * 0.5,
+    #         mode='mirror')
+    # down_block = down_block[:, ::2, ::2]
+
+    # down_block = skimage.transform.resize(down_block,
+    #                                       output_shape=[256, 128, 128],
+    #                                       mode='symmetric',
+    #                                       preserve_range=True,
+    #                                       #anti_aliasing=True
+    # ).astype(job_info.source_dtype)
 
     # extract directory of out_path
     #if not os.path.exists(os.path.dirname(job_info.trg_cube_path)):
@@ -543,7 +655,7 @@ def compress_dataset(config, log_fn):
     worker_pool.join()
 
 
-def compress_cube(job_info, cube_raw = None):
+def compress_cube(job_info, cube_raw=None):
     """TODO
     """
 
@@ -573,8 +685,7 @@ def compress_cube(job_info, cube_raw = None):
         if cube_raw is None:
             cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
 
-        cube_raw = cube_raw.reshape(cube_edge_len * cube_edge_len,
-                                    cube_edge_len)
+        cube_raw = cube_raw.reshape(cube_edge_len * cube_edge_len, -1)
 
         if job_info.pre_gauss > 0.0:
             # blur only in 2d
@@ -593,8 +704,11 @@ def compress_cube(job_info, cube_raw = None):
         # it even faster, but IO is the bottleneck anyway
         cube_img = Image.fromarray(cube_raw)
 
-        cube_img.save(cube_path_without_ending + '.jpg',
-                      quality=job_info.quality_or_ratio)
+
+        newpath = cube_path_without_ending;
+        #newpath = newpath.replace(newpath[:newpath.index("mag")],"/run/media/npfeiler/2A4620300680E198/AOB2014NA/")
+        #cube_img.save(newpath + '.png', quality=job_info.quality_or_ratio) # TODO
+        cube_img.save(newpath + '.jpg', quality=job_info.quality_or_ratio)
 
     elif job_info.compressor == 'j2k':
         cmd_string = open_jpeg_bin_path + \
@@ -623,8 +737,14 @@ def compress_cube_init(log_queue):
 
 
 def write_compressed_cube(config, cube_data, prefix, cube_full_path):
+    # write_cube(cube_data, prefix, cube_full_path) # TODO
     if not os.path.exists(prefix):
         os.makedirs(prefix)
+
+    #newprefix = prefix
+    #newprefix = newprefix.replace(newprefix[:newprefix.index("mag")],"/run/media/npfeiler/2A4620300680E198/AOB2014NA/")
+    #if not os.path.exists(newprefix):
+    #    os.makedirs(newprefix)
 
     this_job_info = CompressionJobInfo()
 
@@ -695,8 +815,8 @@ def init_from_source_dir(config, log_fn):
     source_files = [
         f for f in os.listdir(source_path)
         if any([f.endswith(suffix)
-                # [:-1] cuts away the description string `*.suffix'
-                for suffix in SOURCE_FORMAT_FILES[source_format][:-1]])]
+            # [:-1] cuts away the description string `*.suffix'
+            for suffix in SOURCE_FORMAT_FILES[source_format][:-1]])]
 
 
     source_path = config.get('Project', 'source_path')
@@ -787,8 +907,9 @@ def make_mag1_cubes_from_z_stack(config,
     """TODO
     """
 
-    target_path = config.get('Project', 'target_path')
     exp_name = config.get('Project', 'exp_name')
+    target_path = config.get('Project', 'target_path') + "/" + exp_name
+    config.set('Project', 'target_path', target_path)
 
     skip_already_cubed_layers = config.getboolean('Processing',
                                                   'skip_already_cubed_layers')
@@ -796,7 +917,7 @@ def make_mag1_cubes_from_z_stack(config,
     cube_edge_len = config.getint('Processing', 'cube_edge_len')
     source_dtype = config.get('Dataset', 'source_dtype')
 
-    if source_dtype == 'numpy.uint16':
+    if source_dtype == 'uint16':
         source_dtype = np.uint16
     else:
         source_dtype = np.uint8
@@ -1044,15 +1165,12 @@ def knossos_cuber(config, log_fn):
         scale = literal_eval(config.get('Dataset', 'scaling'))
         exp_name = config.get('Project', 'exp_name')
 
-
-        write_knossos_conf(dataset_base_path + "/", scale, boundaries, exp_name,
-                           mag=1)
+        write_knossos_conf(dataset_base_path + "/", scale, boundaries, exp_name, mag=1)
         open(dataset_base_path + "/mag1/knossos.conf", 'w') # only write dummy for mag detection
 
         total_mag1_time = time.time() - mag1_ref_time
 
-        log_fn("Mag 1 succesfully cubed. Took {0} h"
-               .format(total_mag1_time/3600)) #d f/i
+        log_fn("Mag 1 succesfully cubed. Took {0} h".format(total_mag1_time/3600)) #d f/i
 
     knossos_mag_names = config.get('Dataset', 'mag_names', fallback="knossos").lower() == "knossos"
     if knossos_mag_names:
@@ -1071,7 +1189,7 @@ def knossos_cuber(config, log_fn):
         mags_to_gen = reduce(lambda x, y: int(x) ** int(y),
                              mags_to_gen_string.split("**"))
 
-        while curr_mag <= mags_to_gen:
+        while curr_mag < mags_to_gen:
             if knossos_mag_names:
                 prev_mag = curr_mag // 2
             else:
@@ -1090,7 +1208,6 @@ def knossos_cuber(config, log_fn):
 
         log_fn("All mags generated. Took {0} h."
                .format((time.time() - total_down_ref_time)/3600))
-
 
     if config.getboolean('Compression', 'perform_compression'):
         total_comp_ref_time = time.time()
