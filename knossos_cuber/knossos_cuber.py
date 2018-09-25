@@ -283,7 +283,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         if z > max_z:
             max_z = int(mobj.group('z'))
 
-    if max_x <= 1 and max_y <= 1 and max_z <= 1:
+    if max_x < 1 and max_y < 1 and max_z < 1:
         # nothing to downsample, stopping
         log_fn("Further downsampling is useless, stopping.")
         return False
