@@ -48,7 +48,7 @@ from shutil import copyfile
 
 from pathlib import Path
 
-import skimage.transform
+#import skimage.transform
 
 #import libtiff
 #import tifffile
