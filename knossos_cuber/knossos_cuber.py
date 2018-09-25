@@ -98,17 +98,26 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
     all_cubes = []
 
     zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000");
-    if os.path.exists(zero_dir):
+    allow_zerdir = False
+    use_zerodir = False
+    if os.path.exists(zero_dir) and allow_zerdir:
+        log_fn("used zero dir for dimensions: {0} s".format(zero_dir))
+        use_zerodir = True
         found_cube_files = os.listdir(zero_dir)
     else:
+        log_fn("traversing dataset for dimensions")
         found_cube_files = []
         ref_time = time.time()
         for root, _, files in os.walk(dataset_base_path):
-            if len(files) > 1:
-                print("either overlay cubes or different compressions found")
-            for cur_file in files:
-                if not os.path.basename(cur_file) == "knossos.conf":
-                    all_cubes.append(os.path.join(root, cur_file))
+            cur_file = None
+            for file in [f for f in files if os.path.basename(f).endswith(".jpg")]:
+                cur_file = file
+            for file in [f for f in files if os.path.basename(f).endswith(".raw")]:
+                cur_file = file
+            for file in [f for f in files if os.path.basename(f).endswith(".png")]:
+                cur_file = file
+            if cur_file is not None:
+                all_cubes.append(os.path.join(root, cur_file))
             # if len(all_cubes) > 100:
             #     break
         found_cube_files.append(all_cubes[0])
@@ -119,17 +128,17 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
     log_fn("extracted experiment name: »{0}«".format(experimentname))
 
     from_raw = None
-    for file in found_cube_files:
-        extension = os.path.splitext(file)[1].lower()
+    for cur_file in found_cube_files:
+        extension = os.path.splitext(cur_file)[1].lower()
         if extension == ".raw":
-            from_raw = os.stat(os.path.join(dataset_base_path, "x0000", "y0000", "z0000", file)).st_size
+            from_raw = os.stat(os.path.join(dataset_base_path, "x0000", "y0000", "z0000", cur_file)).st_size
             break
         if extension != ".jpg" and extension != ".jpeg":
             break
 
     log_fn("using {0}".format(extension))
 
-    if os.path.exists(zero_dir):
+    if use_zerodir:
         mag = int(re.compile(r'.*mag(?P<magID>\d+)').search(dataset_base_path).group('magID'))
 
         x_count = len([name for name in os.listdir(dataset_base_path) if os.path.isdir(os.path.join(dataset_base_path, name))])
@@ -183,6 +192,19 @@ def get_cube_fname(basepath, expname, mag, x, y, z, extension):
                    'mag': mag,
                    'extension': extension})
 
+def find_mag_folders(dataset_base_path, log_fn):
+    mag_matcher = re.compile(r'.*mag(?P<magID>\d+)')
+    found_mags = {}
+    for subdir in [name for name in os.listdir(dataset_base_path)
+               if os.path.isdir(os.path.join(dataset_base_path, name))]:
+        mobj = mag_matcher.search(subdir)
+        try:
+            found_mags[int(mobj.group('magID'))] = subdir
+        except:
+            log_fn("Subdirectory found in the base folder that "
+                   "does not comply with the KNOSSOS dataset standard: {0}"
+                   .format(subdir))
+    return found_mags
 
 def downsample_dataset(config, src_mag, trg_mag, log_fn):
     dataset_base_path = config.get('Project', 'target_path')
@@ -192,16 +214,10 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         config.getint('Processing', 'buffer_size_in_cubes_downsampling')
     num_io_threads = config.getint('Processing', 'num_io_threads')
 
-    # check if src mag is available
-    subdirs = [name
-               for name in os.listdir(dataset_base_path)
-               if os.path.isdir(os.path.join(dataset_base_path, name))]
-
     mag_matcher = re.compile(r'.*mag(?P<magID>\d+)')
-
-    found_mags = {}
-
-    for subdir in subdirs:
+    found_mags = find_mag_folders(dataset_base_path, log_fn)
+    for subdir in [name for name in os.listdir(dataset_base_path)
+               if os.path.isdir(os.path.join(dataset_base_path, name))]:
         mobj = mag_matcher.search(subdir)
         try:
             found_mags[int(mobj.group('magID'))] = subdir
@@ -210,6 +226,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                    "does not comply with the KNOSSOS dataset standard: {0}"
                    .format(subdir))
 
+    # check if src mag is available
     if not src_mag in found_mags.keys():
         raise Exception("The src mag folder could not be found in the base "
                         "path folder.")
@@ -266,7 +283,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
         if z > max_z:
             max_z = int(mobj.group('z'))
 
-    if max_x <= 2 and max_y <= 2 and max_z <= 2:
+    if max_x <= 1 and max_y <= 1 and max_z <= 1:
         # nothing to downsample, stopping
         log_fn("Further downsampling is useless, stopping.")
         return False
@@ -324,15 +341,17 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
 
         # out_path = out_path.replace('mag'+str(src_mag), 'mag'+str(trg_mag))
         extension = ".jpg"
-        this_job_info.trg_cube_path = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z // 2, extension)  #d int/int
-        if trg_mag < 2: # TODO
+        zanisotrop = trg_mag <= config.getint('Processing', 'keep_z_until_mag', fallback=1)
+        if zanisotrop: # TODO
             this_job_info.trg_cube_path = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z, extension)  #d int/int
             this_job_info.trg_cube_path2 = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z + 1, extension)  #d int/int
+        else:
+            this_job_info.trg_cube_path = get_cube_fname(dataset_base_path, experimentname, trg_mag, cur_x // 2, cur_y // 2, cur_z // 2, extension)  #d int/int
 
         if config.getboolean('Processing', 'skip_already_cubed_layers') and (\
                 os.path.exists(this_job_info.trg_cube_path) and 
                 #os.path.exists(this_job_info.trg_cube_path.replace("png", "jpg"))\
-                (trg_mag >= 4 or os.path.exists(this_job_info.trg_cube_path2))):
+                (not zanisotrop or os.path.exists(this_job_info.trg_cube_path2))):
                 #and os.path.exists(this_job_info.trg_cube_path2.replace("png", "jpg"))):
             #log_fn("path exists: {0}".format(this_job_info.trg_cube_path.replace("png", "{png,jpg}")))
             skipped_count += 1
@@ -392,9 +411,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                .format(len(this_job_chunk), chunk_id, len(chunked_jobs), this_job_chunk[0].trg_cube_path))
 
         ref_time = time.time()
-        worker_pool = multiprocessing.Pool(num_workers,
-                                           downsample_cube_init,
-                                           [log_queue])
+        worker_pool = multiprocessing.Pool(num_workers, downsample_cube_init, [log_queue])
         #worker_pool = multiprocessing_threads.Pool(num_workers)
 
         log_fn("Downsampling…")
@@ -439,14 +456,15 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
             if threading.active_count() >= num_io_threads:
                 while threading.active_count() >= num_io_threads:
                     time.sleep(0.001)
-            this_thread = threading.Thread(target=write_compressed_cube,
-                                           args=[config,
-                                                 first_cube,
-                                                 os.path.dirname(job_info.trg_cube_path),
-                                                 job_info.trg_cube_path])
-            write_threads.append(this_thread)
-            this_thread.start()
-            if job_info.trg_cube_path2 is not '':
+            if not np.sum(first_cube) == 0:
+                this_thread = threading.Thread(target=write_compressed_cube,
+                                               args=[config,
+                                                     first_cube,
+                                                     os.path.dirname(job_info.trg_cube_path),
+                                                     job_info.trg_cube_path])
+                write_threads.append(this_thread)
+                this_thread.start()
+            if job_info.trg_cube_path2 is not '' and not np.sum(second_cube) == 0:
                 this_thread = threading.Thread(target=write_compressed_cube,
                                                args=[config,
                                                      second_cube,
@@ -610,52 +628,45 @@ def compress_dataset(config, log_fn):
     dataset_base_path = config.get('Project', 'target_path')
     num_workers = config.getint('Compression', 'num_compression_cores')
 
-    mag_dirs = [dataset_base_path + '/' + name
-                for name in os.listdir(dataset_base_path)
-                if os.path.isdir(os.path.join(dataset_base_path, name))]
-
     log_fn("Analysing source dataset...")
 
     list_of_all_cubes = []
-    for mag_dir in mag_dirs:
+    for mag_dir in find_mag_folders(dataset_base_path, log_fn):
+        if mag_dir < 2:# HACK
+            continue
         list_of_all_cubes.extend(
-            get_list_of_all_cubes_in_dataset(mag_dir, log_fn))
+            get_list_of_all_cubes_in_dataset(os.path.join(dataset_base_path, "mag{}".format(mag_dir)), log_fn)[1])
 
     compress_job_infos = []
     for cube_path in list_of_all_cubes:
         this_job_info = CompressionJobInfo()
 
         this_job_info.compressor = config.get('Compression', 'compression_algo')
-        this_job_info.quality_or_ratio = config.getint('Compression',
-                                                       'out_comp_quality')
+        this_job_info.quality_or_ratio = config.getint('Compression', 'out_comp_quality')
         this_job_info.src_cube_path = cube_path
-        this_job_info.pre_gauss = config.getfloat('Compression',
-                                                  'pre_comp_gauss_filter')
+        this_job_info.pre_gauss = config.getfloat('Compression', 'pre_comp_gauss_filter')
 
         compress_job_infos.append(this_job_info)
 
     log_fn("Starting {0} workers...".format(num_workers))
     log_queue = multiprocessing.Queue()
 
-    worker_pool = multiprocessing.Pool(num_workers,
-                                       initializer=compress_cube_init,
-                                       initargs=[log_queue])
+    worker_pool = multiprocessing.Pool(num_workers, compress_cube_init, [log_queue])
     # distribute cubes to worker pool
-
-    async_result = worker_pool.map_async(compress_cube,
-                                         compress_job_infos,
-                                         chunksize=10)
-
+    async_result = worker_pool.map(compress_cube, compress_job_infos, chunksize=10)
     worker_pool.close()
 
-    while not async_result.ready():
+    #while not async_result.ready():
+    while not log_queue.empty():
         log_output = log_queue.get()
         log_fn(log_output)
 
     worker_pool.join()
 
+    log_fn("Done compressing…".format(num_workers))
 
-def compress_cube(job_info, cube_raw=None):
+
+def compress_cube(job_info, cube_raw = None):
     """TODO
     """
 
@@ -663,13 +674,13 @@ def compress_cube(job_info, cube_raw=None):
     cube_edge_len = job_info.cube_edge_len
     open_jpeg_bin_path = job_info.open_jpeg_bin_path
 
-    if job_info.compressor == 'jpeg':
+    if 'jpg' in job_info.compressor:
         if job_info.quality_or_ratio < 40:
-            raise Exception("Improbable quality value set for jpeg as "
+            raise Exception("Improbable quality value set for jpg as "
                             "compressor: Use values between 50 and 90 for "
                             "reasonable results. "
                             "Higher value -> better quality.")
-    elif job_info.compressor == 'j2k':
+    elif 'j2k' in job_info.compressor:
         if job_info.quality_or_ratio > 20:
             raise Exception("Improbable quality value set for j2k as "
                             "compressor: Use values between 2 and 10 for "
@@ -681,36 +692,47 @@ def compress_cube(job_info, cube_raw=None):
     if FADVISE_AVAILABLE:
         fadvise.willneed(job_info.src_cube_path)
 
-    if job_info.compressor == 'jpeg':
-        if cube_raw is None:
-            cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
+    if cube_raw is None:
+        if job_info.src_cube_path.endswith(".raw"):
+            content = ''
+            # buffersize=131072*2
+            fd = io.open(job_info.src_cube_path, 'rb')
+            #             # buffering = buffersize)
+            # for i in range(0, (cube_edge_len**3 / buffersize) + 1):
+            #    content += fd.read(buffersize)
+            content = fd.read(-1)
+            fd.close()
+            cube_raw = np.fromstring(content, dtype=np.uint8)
+            #cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
+        elif job_info.src_cube_path.endswith(".png"):
+            cube_raw = np.array(Image.open(job_info.src_cube_path))
+    cube_raw = cube_raw.reshape(cube_edge_len * cube_edge_len, -1)
 
-        cube_raw = cube_raw.reshape(cube_edge_len * cube_edge_len, -1)
 
-        if job_info.pre_gauss > 0.0:
-            # blur only in 2d
-            if CV2_AVAILABLE:
-                cv2.GaussianBlur(cube_raw,
-                                 (5, 5),
-                                 job_info.pre_gauss,
-                                 cube_raw)
-            else:
-                cube_raw = scipy.ndimage.filters.gaussian_filter(
-                    cube_raw, job_info.pre_gauss)
+    if job_info.pre_gauss > 0.0:
+        # blur only in 2d
+        if CV2_AVAILABLE:
+            cv2.GaussianBlur(cube_raw,
+                             (5, 5),
+                             job_info.pre_gauss,
+                             cube_raw)
+        else:
+            cube_raw = scipy.ndimage.filters.gaussian_filter(
+                cube_raw, job_info.pre_gauss)
 
+    cube_img = Image.fromarray(cube_raw)
+
+    if 'jpg' in job_info.compressor:
         # the exact shape of the 2d representation for compression is
         # actually important!
         # PIL performs reasonably fast; one could try libjpeg-turbo to make
         # it even faster, but IO is the bottleneck anyway
-        cube_img = Image.fromarray(cube_raw)
+        cube_img.save(cube_path_without_ending + '.jpg', quality=job_info.quality_or_ratio)
 
+    if 'png' in job_info.compressor:
+        cube_img.save(cube_path_without_ending + '.png')
 
-        newpath = cube_path_without_ending;
-        #newpath = newpath.replace(newpath[:newpath.index("mag")],"/run/media/npfeiler/2A4620300680E198/AOB2014NA/")
-        #cube_img.save(newpath + '.png', quality=job_info.quality_or_ratio) # TODO
-        cube_img.save(newpath + '.jpg', quality=job_info.quality_or_ratio)
-
-    elif job_info.compressor == 'j2k':
+    if 'j2k' in job_info.compressor:
         cmd_string = open_jpeg_bin_path + \
                      ' -i ' + job_info.src_cube_path +\
                      ' -o ' + cube_path_without_ending + '.jp2' +\
@@ -722,9 +744,7 @@ def compress_cube(job_info, cube_raw=None):
 
     # print here, not log_fn, because log_fn may not be able to write to some
     # data structure from multiple processes.
-#    compress_cube.log_queue.put("Compress, writing of {0} took: {1} s"
-#                                .format(job_info.src_cube_path,
-#                                        time.time() - ref_time))
+    #compress_cube.log_queue.put("Compress, writing of {0} took: {1} s".format(cube_path_without_ending, time.time() - ref_time))
 
     return
 
