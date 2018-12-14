@@ -787,7 +787,10 @@ def write_compressed_cube(config, cube_data, prefix, cube_full_path):
     this_job_info.src_cube_path = cube_full_path
     this_job_info.pre_gauss = config.getfloat('Compression', 'pre_comp_gauss_filter')
 
-    compress_cube(this_job_info, cube_data)
+    if 'raw' in this_job_info.compressor:
+        write_cube(cube_data, prefix, cube_full_path)
+    if this_job_info.compressor != 'raw':
+        compress_cube(this_job_info, cube_data)
 
 
 def write_cube(cube_data, prefix, cube_full_path):
