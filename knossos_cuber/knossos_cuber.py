@@ -68,6 +68,8 @@ class InvalidCubingConfigError(Exception):
 
 class DownsampleJobInfo(object):
     def __init__(self):
+        self.config = None
+        self.trg_mag = 2
         self.from_raw = True
         self.src_cube_paths = []
         self.src_cube_local_coords = []
@@ -333,6 +335,8 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
             continue
 
         this_job_info = DownsampleJobInfo()
+        this_job_info.trg_mag = trg_mag
+        this_job_info.config = config
         this_job_info.from_raw = from_raw is not None
         this_job_info.src_cube_paths = these_cubes
         this_job_info.src_cube_local_coords = these_cubes_local_coords
@@ -545,6 +549,16 @@ def downsample_cube(job_info):
         except Exception as e:
             print(path_to_src_cube)
             raise
+
+        if job_info.config.getboolean('Processing', 'compress_source_downsampling_mag', fallback=False)\
+                and job_info.config.getint('Processing', 'first_downsampling_mag') == job_info.trg_mag:
+
+            this_job_info = CompressionJobInfo()
+            this_job_info.compressor = job_info.config.get('Compression', 'compression_algo')
+            this_job_info.quality_or_ratio = job_info.config.getint('Compression', 'out_comp_quality')
+            this_job_info.src_cube_path = path_to_src_cube
+            this_job_info.pre_gauss = job_info.config.getfloat('Compression', 'pre_comp_gauss_filter')
+            compress_cube(this_job_info, this_cube)
 
         #this_cube = np.swapaxes(this_cube, 0, 2)
         #this_cube = np.swapaxes(this_cube, 1, 2)
