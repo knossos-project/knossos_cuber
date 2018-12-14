@@ -1342,6 +1342,10 @@ def create_parser():
              "*.jp(e)g, and *.JP(E)G (`tif' and `png' respectively).")
 
     parser.add_argument(
+        '--keep_z_until_mag',
+        help="Magnification until to do anisotropic downsampling (only xy).")
+
+    parser.add_argument(
         '--config', '-c',
         help="A configuration file. If no file is specified, `config.ini' "
              "from knossos_cuber's installation directory is used. Note that "
@@ -1387,6 +1391,9 @@ def main():
     CONFIG.set('Project', 'source_path', ARGS.source_dir)
     CONFIG.set('Project', 'target_path', ARGS.target_dir)
     CONFIG.set('Dataset', 'source_format', ARGS.format)
+    if ARGS.keep_z_until_mag is not None:
+        CONFIG.set('Processing', 'keep_z_until_mag', ARGS.keep_z_until_mag)
+    print(CONFIG['Processing']['keep_z_until_mag'])
 
     if validate_config(CONFIG):
         knossos_cuber(CONFIG, lambda x: sys.stdout.write(str(x) + '\n'))
