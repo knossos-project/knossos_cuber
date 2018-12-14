@@ -1200,7 +1200,7 @@ def knossos_cuber(config, log_fn):
 
     if config.getboolean('Processing', 'perform_downsampling'):
         total_down_ref_time = time.time()
-        curr_mag = 2  # q mags are always ints, right? (important for division below!)
+        curr_mag = config.getint('Processing', 'first_downsampling_mag', fallback=2)  # q mags are always ints, right? (important for division below!)
 
         # `mags_to_gen' is specified like `2**20' in the configuration file.
         # To parse this number, the string has to be split at `**',
