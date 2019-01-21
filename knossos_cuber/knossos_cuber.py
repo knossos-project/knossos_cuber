@@ -1410,7 +1410,7 @@ def main():
     CONFIG.set('Dataset', 'source_format', ARGS.format)
     if ARGS.keep_z_until_mag is not None:
         CONFIG.set('Processing', 'keep_z_until_mag', ARGS.keep_z_until_mag)
-    print(CONFIG['Processing']['keep_z_until_mag'])
+    print('keep_z_until_mag', CONFIG['Processing']['keep_z_until_mag'])
 
     if validate_config(CONFIG):
         knossos_cuber(CONFIG, lambda x: sys.stdout.write(str(x) + '\n'))
