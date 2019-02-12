@@ -45,6 +45,8 @@ except ImportError:
     from configparser import ConfigParser
 import argparse
 
+# https://github.com/zimeon/iiif/issues/11
+Image.MAX_IMAGE_PIXELS = 1e10
 
 SOURCE_FORMAT_FILES = OrderedDict()
 SOURCE_FORMAT_FILES['tif'] = ['tif', 'tiff', 'TIF', 'TIFF', '*.tif, *.tiff']
@@ -328,7 +330,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
             cube_full_path = job_info.trg_cube_path
             ref_time = time.time()
 
-            if cube_data == 'skipped':
+            if isinstance(cube_data, str) and cube_data == 'skipped':
                 write_times.append(time.time()-ref_time)
                 #print("Skipped cube {0}".format(job_info.trg_cube_path))
                 continue
@@ -709,6 +711,8 @@ def init_from_source_dir(config, log_fn):
 
     buffer_size_in_cubes = config.getint('Processing', 'buffer_size_in_cubes')
 
+    log_fn("Dataset is %d x %d x %d knossos cubes" % \
+          (num_x_cubes, num_y_cubes, num_z_cubes))
     if num_x_cubes * num_y_cubes < buffer_size_in_cubes:
         log_fn("Buffer size sufficient for a single pass per z cube layer")
         num_passes_per_cube_layer = 1
@@ -717,11 +721,17 @@ def init_from_source_dir(config, log_fn):
         log_fn("Buffer size not sufficient for single pass per z cube layer - "
                "either increase the buffer size or accept the longer cubing "
                "time due to IO overhead.")
-        num_passes_per_cube_layer = \
-            int(math.ceil(buffer_size_in_cubes // num_y_cubes)) #d int/int
-        #q ^ This should not be a floor division, right? int(math.ceil()) is redundant because result is always a floored int. Apply regular float division inside?
+        log_fn("\tadjusting buffer_size_in_cubes from %d to multiple"
+               " of number of y cubes" % (buffer_size_in_cubes,))
+        buffer_size_in_cubes = \
+            int(math.ceil(buffer_size_in_cubes / num_y_cubes)) * num_y_cubes
+        log_fn("\tnew buffer_size_in_cubes %d" % (buffer_size_in_cubes,))
+        num_x_cubes_per_pass = buffer_size_in_cubes // num_y_cubes
 
-        num_x_cubes_per_pass = num_x_cubes // num_passes_per_cube_layer #d int/int
+        num_passes_per_cube_layer = \
+            int(math.ceil(num_x_cubes / num_x_cubes_per_pass))
+        log_fn("\trequires %d passes per cube layer, %d xcubes per pass" % \
+               (num_passes_per_cube_layer,num_x_cubes_per_pass))
 
     CubingInfo = namedtuple('CubingInfo',
                             'num_x_cubes_per_pass num_y_cubes num_z_cubes '
@@ -795,18 +805,15 @@ def make_mag1_cubes_from_z_stack(config,
 
             # create a src binary copy mask to speed-up the following buffer-filling
             # process; this mask is made for the source_dims
-            copy_mask_src = np.zeros([source_dims[0], source_dims[1]])
+            #copy_mask_src = np.zeros([source_dims[0], source_dims[1]])
 
             this_pass_x_start = cur_pass * num_x_cubes_per_pass * cube_edge_len
-
             this_pass_x_end = (cur_pass+1) * num_x_cubes_per_pass * cube_edge_len
-
-
             if this_pass_x_end > source_dims[0]:
                 this_pass_x_end = source_dims[0]
 
-            copy_mask_src[this_pass_x_start:this_pass_x_end, :] = 1
-            copy_mask_src = (copy_mask_src == 1)
+            #copy_mask_src[this_pass_x_start:this_pass_x_end, :] = 1
+            #copy_mask_src = (copy_mask_src == 1)
 
             # create a trg binary copy mask to speed-up the following buffer-filling
             # process; this mask is made for the target buffer dims
@@ -843,19 +850,21 @@ def make_mag1_cubes_from_z_stack(config,
                 #                             dtype=source_dtype)
                 #else:
                 #ref_time = time.time()
-                fsize = os.stat(all_source_files[z]).st_size
-                buffersize = 524288//2 # optimal for soma cluster #d int/int
-                content = b''
-                # This is optimized code, do not think that a single line
-                # would be faster. At least on the soma MPI cluster,
-                # the default buffering values (read entire file into buffer
-                # instead of smaller chunks) leads to delays and slowness.
-                fd = io.open(all_source_files[z], 'r+b', buffering=buffersize)
-                for i in range(0, (fsize // buffersize) + 1): #d int/int
-                    content += fd.read(buffersize)
-                fd.close()
 
-                PIL_image = Image.open(io.BytesIO(content))
+                #fsize = os.stat(all_source_files[z]).st_size
+                #buffersize = 524288//2 # optimal for soma cluster #d int/int
+                #content = b''
+                ## This is optimized code, do not think that a single line
+                ## would be faster. At least on the soma MPI cluster,
+                ## the default buffering values (read entire file into buffer
+                ## instead of smaller chunks) leads to delays and slowness.
+                #fd = io.open(all_source_files[z], 'r+b', buffering=buffersize)
+                #for i in range(0, (fsize // buffersize) + 1): #d int/int
+                #    content += fd.read(buffersize)
+                #fd.close()
+                #PIL_image = Image.open(io.BytesIO(content))
+
+                PIL_image = Image.open(all_source_files[z])
                 this_layer = np.array(PIL_image)
 
                 # This stupid swap axes call costs us 50% of the image loading
@@ -868,7 +877,10 @@ def make_mag1_cubes_from_z_stack(config,
 
                 # copy the data for this pass into the output buffer
                 if num_passes_per_cube_layer > 1:
-                    this_layer_out_block[z, :, :] = this_layer[copy_mask_src]
+                    this_layer_piece = this_layer[this_pass_x_start:this_pass_x_end,:]
+                    this_layer_out_block[local_z,
+                                         0:this_layer_piece.shape[0],
+                                         0:this_layer_piece.shape[1]] = this_layer_piece
                 else:
                     # single buffer fill - this_layer_out_block is larger than
                     # the individual data files due to the rounding to
@@ -876,7 +888,6 @@ def make_mag1_cubes_from_z_stack(config,
                     # therefore; it is crucial that the slowest changing index,
                     # z, is at the first index (c-style order). The time
                     # difference is 100x for big amounts of data!
-
                     this_layer_out_block[local_z,
                                          0:this_layer.shape[0],
                                          0:this_layer.shape[1]] = this_layer
@@ -891,8 +902,7 @@ def make_mag1_cubes_from_z_stack(config,
             for cur_x in range(0, num_x_cubes_per_pass):
                 for cur_y in range(0, num_y_cubes):
                     ref_time = time.time()
-                    glob_cur_x_cube = \
-                        cur_x + cur_pass * num_passes_per_cube_layer
+                    glob_cur_x_cube = cur_x + cur_pass * num_x_cubes_per_pass
                     glob_cur_y_cube = cur_y
                     glob_cur_z_cube = cur_z
 
