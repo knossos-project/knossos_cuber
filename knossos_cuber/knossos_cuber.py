@@ -850,19 +850,27 @@ def make_mag1_cubes_from_z_stack(config,
                 #                             dtype=source_dtype)
                 #else:
                 #ref_time = time.time()
-                fsize = os.stat(all_source_files[z]).st_size
-                buffersize = 524288//2 # optimal for soma cluster #d int/int
-                content = b''
-                # This is optimized code, do not think that a single line
-                # would be faster. At least on the soma MPI cluster,
-                # the default buffering values (read entire file into buffer
-                # instead of smaller chunks) leads to delays and slowness.
-                fd = io.open(all_source_files[z], 'r+b', buffering=buffersize)
-                for i in range(0, (fsize // buffersize) + 1): #d int/int
-                    content += fd.read(buffersize)
-                fd.close()
 
-                PIL_image = Image.open(io.BytesIO(content))
+                if config.getboolean('Processing', 'use_simple_image_open'):
+                    # This is much faster on a normal workstation than the
+                    # buffering code below. Recommended solution on a cluster
+                    # is to copy the image to a memory mapped drive first
+                    # and then use PIL open on that memory mapped file.
+                    PIL_image = Image.open(all_source_files[z])
+                else:
+                    fsize = os.stat(all_source_files[z]).st_size
+                    buffersize = 524288//2 # optimal for soma cluster #d int/int
+                    content = b''
+                    # This is optimized code, do not think that a single line
+                    # would be faster. At least on the soma MPI cluster,
+                    # the default buffering values (read entire file into buffer
+                    # instead of smaller chunks) leads to delays and slowness.
+                    fd = io.open(all_source_files[z], 'r+b', buffering=buffersize)
+                    for i in range(0, (fsize // buffersize) + 1): #d int/int
+                        content += fd.read(buffersize)
+                    fd.close()
+                    PIL_image = Image.open(io.BytesIO(content))
+
                 this_layer = np.array(PIL_image)
 
                 # This stupid swap axes call costs us 50% of the image loading
