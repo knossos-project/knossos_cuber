@@ -328,7 +328,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
             cube_full_path = job_info.trg_cube_path
             ref_time = time.time()
 
-            if cube_data == 'skipped':
+            if isinstance(cube_data, str) and cube_data == 'skipped':
                 write_times.append(time.time()-ref_time)
                 #print("Skipped cube {0}".format(job_info.trg_cube_path))
                 continue
