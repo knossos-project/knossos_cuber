@@ -45,6 +45,8 @@ except ImportError:
     from configparser import ConfigParser
 import argparse
 
+# https://github.com/zimeon/iiif/issues/11
+Image.MAX_IMAGE_PIXELS = 1e10
 
 SOURCE_FORMAT_FILES = OrderedDict()
 SOURCE_FORMAT_FILES['tif'] = ['tif', 'tiff', 'TIF', 'TIFF', '*.tif, *.tiff']
