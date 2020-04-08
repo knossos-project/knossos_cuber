@@ -1232,6 +1232,25 @@ def create_parser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        'source_dir',
+        help="Directory containing the input images.")
+
+    parser.add_argument(
+        'target_dir',
+        help="Output directory for the generated dataset.")
+
+    parser.add_argument(
+        '--format', '-f',
+        help="Specifies the format of the input images. "
+             "Currently supported formats are: png, tif, jpg. "
+             "The option `jpg' searches for all images matching "
+             "*.jp(e)g, and *.JP(E)G (`tif' and `png' respectively).")
+
+    parser.add_argument(
+        '--keep_z_until_mag',
+        help="Magnification until to do anisotropic downsampling (only xy).")
+
+    parser.add_argument(
         '--config', '-c',
         help="A configuration file. If no file is specified, `config.ini' "
              "from knossos_cuber's installation directory is used. Note that "
@@ -1251,6 +1270,15 @@ def main():
         if not config_file.is_file():
             copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "config.ini"), config_file)
     CONFIG = read_config_file(ARGS.config)
+
+    if ARGS.source_dir:
+        CONFIG.set('Project', 'source_path', ARGS.source_dir)
+    if ARGS.target_dir:
+        CONFIG.set('Project', 'target_path', ARGS.target_dir)
+    if ARGS.format:
+        CONFIG.set('Dataset', 'source_format', ARGS.format)
+    if ARGS.keep_z_until_mag:
+        CONFIG.set('Processing', 'keep_z_until_mag', ARGS.keep_z_until_mag)
 
     if validate_config(CONFIG):
         knossos_cuber(CONFIG, lambda x: sys.stdout.write(str(x) + '\n'))
