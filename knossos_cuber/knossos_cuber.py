@@ -791,6 +791,8 @@ def init_from_source_dir(config, log_fn):
     source_format = config.get('Dataset', 'source_format')
     source_path = config.get('Project', 'source_path')
 
+    print({section: dict(config[section]) for section in config.sections()})
+
     source_files = [
         f for f in os.listdir(source_path)
         if any([f.endswith(suffix)
