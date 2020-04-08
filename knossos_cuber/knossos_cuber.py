@@ -93,7 +93,7 @@ def get_compression_algos(algos_str):
     return [xx.strip() for xx in algos_str.split(',')]
 
 
-def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
+def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn, allow_zero_dir=False):
     """TODO
 
     Args:
@@ -103,10 +103,9 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn):
     """
     all_cubes = []
 
-    zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000")
-    allow_zerdir = False
+    zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000");
     use_zerodir = False
-    if os.path.exists(zero_dir) and allow_zerdir:
+    if os.path.exists(zero_dir) and allow_zero_dir:
         log_fn("used zero dir for dimensions: {0} s".format(zero_dir))
         use_zerodir = True
         found_cube_files = os.listdir(zero_dir)
@@ -242,7 +241,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
 
     # we walk through the dataset structure and collect all available cubes
     from_raw, all_cubes = get_list_of_all_cubes_in_dataset(
-        dataset_base_path + '/' + found_mags[src_mag], log_fn)
+        dataset_base_path + '/' + found_mags[src_mag], log_fn, config.get('Processing', 'allow_zero_dir', fallback=False))
 
     cube_edge_len = config.getint('Processing', 'cube_edge_len')
 
@@ -595,7 +594,7 @@ def compress_dataset(config, log_fn):
     list_of_all_cubes = []
     for mag_dir in find_mag_folders(dataset_base_path, log_fn):
         list_of_all_cubes.extend(
-            get_list_of_all_cubes_in_dataset(os.path.join(dataset_base_path, "mag{}".format(mag_dir)), log_fn)[1])
+            get_list_of_all_cubes_in_dataset(os.path.join(dataset_base_path, "mag{}".format(mag_dir)), log_fn)[1], config.get('Processing', 'allow_zero_dir', fallback=False))
 
     compress_job_infos = []
     for cube_path in list_of_all_cubes:
