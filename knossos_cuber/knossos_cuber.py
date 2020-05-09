@@ -89,6 +89,73 @@ class CompressionJobInfo(object):
         self.cube_edge_len = 128
 
 
+def get_pyknossos_scale_and_cube_count_str(mag1_scale, mag_count, extent, z_constant_up_to_mag=1, cube_sz=128):
+    scales = []
+    cube_counts = []
+
+    for cur_mag in range(1, mag_count + 1):
+        if cur_mag <= z_constant_up_to_mag:
+            cur_down_factor = (2 ** (cur_mag - 1), 2 ** (cur_mag - 1), 1)
+        else:
+            cur_down_factor = (2 ** (cur_mag - 1), 2 ** (cur_mag - 1), 2 ** (cur_mag - 1))
+
+        cur_scale = tuple(xx * yy for xx, yy in zip(mag1_scale, cur_down_factor))
+
+        cur_cube_count = tuple(int(np.ceil((xx / yy) / cube_sz)) for xx, yy in zip(extent, cur_down_factor))
+        cube_counts.append(cur_cube_count)
+        scales.append(cur_scale)
+
+    scales_str = ', '.join([','.join(str(yy) for yy in xx) for xx in scales])
+    cube_counts_str = ', '.join([','.join(str(yy) for yy in xx) for xx in cube_counts])
+
+    return scales_str, cube_counts_str
+
+
+def get_pyk_conf_str(experiment_name, mag1_scale, mag_count, extent, z_constant_up_to_mag, descriptions, extensions, urls=None, include_file_type=True):
+    config_str_template = """[{dataset_label}]
+_BaseName = {experiment_name}
+_ServerFormat = {server_format}
+_DataScale = {scale}
+_NumberofCubes = {cube_cnt}
+_Extent = {extent}
+_Description = "{description}"
+_BaseExt = {extension}
+"""
+
+    ext_and_filetype = {
+        'raw': ('.raw', 0),
+        'png': ('.png', 2),
+        'jpg': ('.jpg', 3),
+    }
+
+    config_strs = []
+    if urls is None:
+        urls = [None] * len(descriptions)
+    for cur_dsc, cur_ext, cur_url in zip(descriptions, extensions, urls):
+        extension_str, filetype_str = ext_and_filetype[cur_ext]
+        extent_str = ','.join(str(xx) for xx in extent)
+
+        scale_str, cube_count_str = get_pyknossos_scale_and_cube_count_str(mag1_scale, mag_count, extent, z_constant_up_to_mag=z_constant_up_to_mag)
+        cur_config_str = config_str_template.format(
+            dataset_label='Dataset',
+            experiment_name=experiment_name,
+            scale=scale_str,
+            server_format='pyknossos',
+            cube_cnt=cube_count_str,
+            extent=extent_str,
+            description=cur_dsc,
+            extension=extension_str,
+        )
+        if include_file_type:
+            cur_config_str += f"_FileType = {filetype_str}\n"
+        if cur_url is not None:
+            cur_config_str += f'_BaseURL = {cur_url}\n'
+        cur_config_str += '\n'
+        config_strs.append(cur_config_str)
+
+    return '\n'.join(config_strs)
+
+
 def get_compression_algos(algos_str):
     return [xx.strip() for xx in algos_str.split(',')]
 
@@ -103,7 +170,7 @@ def get_list_of_all_cubes_in_dataset(dataset_base_path, log_fn, allow_zero_dir=F
     """
     all_cubes = []
 
-    zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000");
+    zero_dir = os.path.join(dataset_base_path, "x0000", "y0000", "z0000")
     use_zerodir = False
     if os.path.exists(zero_dir) and allow_zero_dir:
         log_fn("used zero dir for dimensions: {0} s".format(zero_dir))
@@ -592,9 +659,11 @@ def compress_dataset(config, log_fn):
     log_fn("Analysing source dataset...")
 
     list_of_all_cubes = []
+    allow_zero_dir = config.get('Processing', 'allow_zero_dir', fallback=False)
     for mag_dir in find_mag_folders(dataset_base_path, log_fn):
         list_of_all_cubes.extend(
-            get_list_of_all_cubes_in_dataset(os.path.join(dataset_base_path, "mag{}".format(mag_dir)), log_fn)[1], config.get('Processing', 'allow_zero_dir', fallback=False))
+            get_list_of_all_cubes_in_dataset(
+                os.path.join(dataset_base_path, f'mag{mag_dir}'), log_fn, allow_zero_dir)[1])
 
     compress_job_infos = []
     for cube_path in list_of_all_cubes:
@@ -787,7 +856,6 @@ def init_from_source_dir(config, log_fn):
         num_passes_per_cube_layer (int):
     """
 
-
     source_format = config.get('Dataset', 'source_format')
     source_path = config.get('Project', 'source_path')
 
@@ -875,13 +943,13 @@ def make_mag1_cubes_from_z_stack(config,
                                  num_y_cubes,
                                  num_z_cubes,
                                  num_passes_per_cube_layer,
-                                 log_fn):
+                                 log_fn,
+                                 channel=None):
     """TODO
     """
 
     exp_name = config.get('Project', 'exp_name')
-    target_path = config.get('Project', 'target_path') + "/" + exp_name
-    config.set('Project', 'target_path', target_path)
+    target_path = config.get('Project', 'target_path')
 
     skip_already_cubed_layers = config.getboolean('Processing',
                                                   'skip_already_cubed_layers')
@@ -905,7 +973,6 @@ def make_mag1_cubes_from_z_stack(config,
             # test whether this layer already contains cubes
             prefix = os.path.normpath(os.path.abspath(
                 target_path + '/mag1' + '/x%04d/y%04d/z%04d/' % (1, 1, cur_z)))
-
             cube_full_path = os.path.normpath(
                 prefix + '/%s_mag%d_x%04d_y%04d_z%04d.raw'
                 # 1 indicates mag1
@@ -960,6 +1027,8 @@ def make_mag1_cubes_from_z_stack(config,
                     PIL_image = Image.open(io.BytesIO(content))
 
                 this_layer = np.array(PIL_image)
+                if channel is not None:
+                    this_layer = this_layer[..., channel]
                 if invert:
                     this_layer = np.iinfo(source_dtype).max - this_layer
 
@@ -1063,20 +1132,91 @@ def knossos_cuber(config, log_fn):
 
     """
 
+    format_descriptions = {
+        'png': 'low quality (png)',
+        'jpg': 'low quality (jpg)',
+        'raw': 'high quality (raw)',
+    }
+
+    channel_names = {
+        0: 'red',
+        1: 'green',
+        2: 'blue',
+    }
+
+    rgb = config.getboolean('Dataset', 'rgb', fallback=False)
+    if rgb:
+        channels = [0, 1, 2]
+    else:
+        channels = [None]
+
     if config.getboolean('Processing', 'perform_mag1_cubing'):
         cubing_info = init_from_source_dir(config, log_fn)
         all_source_files = cubing_info.all_source_files
 
-        mag1_ref_time = time.time()
+    target_path_basic = config.get('Project', 'target_path')
 
-        make_mag1_cubes_from_z_stack(
-            config,
-            all_source_files,
-            cubing_info.num_x_cubes_per_pass,
-            cubing_info.num_y_cubes,
-            cubing_info.num_z_cubes,
-            cubing_info.num_passes_per_cube_layer,
-            log_fn)
+    for cur_ch in channels:
+        print(f'Running for channel: {cur_ch}')
+        high_mag = 1
+
+        if rgb:
+            cur_target_pth = f'{target_path_basic}/{cur_ch}/'
+            config.set('Project', 'target_path', cur_target_pth)
+
+        if config.getboolean('Processing', 'perform_mag1_cubing'):
+            mag1_ref_time = time.time()
+
+            make_mag1_cubes_from_z_stack(
+                config,
+                all_source_files,
+                cubing_info.num_x_cubes_per_pass,
+                cubing_info.num_y_cubes,
+                cubing_info.num_z_cubes,
+                cubing_info.num_passes_per_cube_layer,
+                log_fn,
+                channel=cur_ch)
+
+            total_mag1_time = time.time() - mag1_ref_time
+
+            log_fn("Mag 1 (channel: {1}) succesfully cubed. Took {0} h".format(
+                total_mag1_time/3600, cur_ch, )) #d f/i
+
+        if config.getboolean('Processing', 'perform_downsampling'):
+            log_fn("using consecutive mag names (1, 2, 3, 4, 5…)")
+
+            total_down_ref_time = time.time()
+            curr_mag = config.getint('Processing', 'first_downsampling_mag', fallback=2)  # q mags are always ints, right? (important for division below!)
+
+            # `mags_to_gen' is specified like `2**20' in the configuration file.
+            # To parse this number, the string has to be split at `**',
+            # and then evaluated.
+            mags_to_gen_string = config.get('Dataset', 'mags_to_gen')
+            mags_to_gen = reduce(lambda x, y: int(x) ** int(y),
+                                 mags_to_gen_string.split("**"))
+
+            while curr_mag < mags_to_gen:
+                prev_mag = curr_mag - 1
+                worked = downsample_dataset(config, prev_mag, curr_mag, log_fn) #d int/int
+
+                if worked:
+                    log_fn("Mag {0} succesfully cubed.".format(curr_mag))
+                    curr_mag += 1
+                    high_mag = curr_mag
+                else:
+                    log_fn("Done with downsampling.")
+                    break
+
+            log_fn("All mags generated. Took {0} h."
+                   .format((time.time() - total_down_ref_time)/3600))
+
+        if config.getboolean('Compression', 'perform_compression'):
+            print('Running compression')
+            total_comp_ref_time = time.time()
+            compress_dataset(config, log_fn)
+
+            log_fn("Compression done. Took {0} h."
+                   .format((time.time() - total_comp_ref_time)/3600))
 
         source_dims = literal_eval(config.get('Dataset', 'source_dims'))
         boundaries = (source_dims[0], source_dims[1], len(all_source_files))
@@ -1084,58 +1224,46 @@ def knossos_cuber(config, log_fn):
         dataset_base_path = config.get('Project', 'target_path')
         scale = literal_eval(config.get('Dataset', 'scaling'))
         exp_name = config.get('Project', 'exp_name')
-
-        write_knossos_conf(dataset_base_path + "/", scale, boundaries, exp_name, mag=1)
-        open(dataset_base_path + "/mag1/knossos.conf", 'w') # only write dummy for mag detection
-
-        total_mag1_time = time.time() - mag1_ref_time
-
-        log_fn("Mag 1 succesfully cubed. Took {0} h".format(total_mag1_time/3600)) #d f/i
-
-    if config.getboolean('Processing', 'perform_downsampling'):
-        knossos_mag_names = config.get('Dataset', 'mag_names', fallback="knossos").lower() == "knossos"
-        if knossos_mag_names:
-            log_fn("using KNOSSOS mag names (1, 2, 4, 8, 16…)")
+        keep_z_up_to = config.getint('Processing', 'keep_z_until_mag', fallback=1)
+        if config.getboolean('Compression', 'perform_compression'):
+            formats = get_compression_algos(config.get('Compression', 'compression_algo'))
+            descriptions = [format_descriptions[xx] for xx in formats]
+            formats.append('raw')
+            descriptions.append(format_descriptions['raw'])
         else:
-            log_fn("using consecutive mag names (1, 2, 3, 4, 5…)")
+            formats = ['raw']
+            descriptions = ['high quality (raw)']
 
-        total_down_ref_time = time.time()
-        curr_mag = config.getint('Processing', 'first_downsampling_mag', fallback=2)  # q mags are always ints, right? (important for division below!)
+        cur_pyk_conf_str = get_pyk_conf_str(exp_name, scale, high_mag, boundaries, keep_z_up_to, descriptions, formats,
+                                            urls=None)
 
-        # `mags_to_gen' is specified like `2**20' in the configuration file.
-        # To parse this number, the string has to be split at `**',
-        # and then evaluated.
-        mags_to_gen_string = config.get('Dataset', 'mags_to_gen')
-        mags_to_gen = reduce(lambda x, y: int(x) ** int(y),
-                             mags_to_gen_string.split("**"))
+        with open(f'{dataset_base_path}/{exp_name}.pyk.conf', 'w') as fp:
+            fp.write(cur_pyk_conf_str)
 
-        while curr_mag < mags_to_gen:
-            if knossos_mag_names:
-                prev_mag = curr_mag // 2
+        open(dataset_base_path + "/mag1/knossos.conf", 'w')  # only write dummy for mag detection
+
+    if rgb:
+        rgb_conf_str = ''
+        for cur_ch in channels:
+            if config.getboolean('Compression', 'perform_compression'):
+                formats = get_compression_algos(config.get('Compression', 'compression_algo'))
+                descriptions = [format_descriptions[xx] for xx in formats]
+                formats.append('raw')
+                descriptions.append(format_descriptions['raw'])
             else:
-                prev_mag = curr_mag - 1
-            worked = downsample_dataset(config, prev_mag, curr_mag, log_fn) #d int/int
+                formats = ['raw']
+                descriptions = ['high quality (raw)']
 
-            if worked:
-                log_fn("Mag {0} succesfully cubed.".format(curr_mag))
-                if knossos_mag_names:
-                    curr_mag *= 2
-                else:
-                    curr_mag += 1
-            else:
-                log_fn("Done with downsampling.")
-                break
+            descriptions = [xx + f' ({channel_names.get(cur_ch, "unknown")})' for xx in descriptions]
+            urls = [f'file:{cur_ch}/'] * len(descriptions)
+            cur_pyk_conf_str = get_pyk_conf_str(
+                exp_name, scale, high_mag, boundaries, keep_z_up_to, descriptions, formats, urls=urls, include_file_type=False)
+            rgb_conf_str += cur_pyk_conf_str
 
-        log_fn("All mags generated. Took {0} h."
-               .format((time.time() - total_down_ref_time)/3600))
+        with open(f'{target_path_basic}/{exp_name}_rgb.pyk.conf', 'w') as fp:
+            fp.write(rgb_conf_str)
 
-    if config.getboolean('Compression', 'perform_compression'):
-        print('Running compression')
-        total_comp_ref_time = time.time()
-        compress_dataset(config, log_fn)
 
-        log_fn("Compression done. Took {0} h."
-               .format((time.time() - total_comp_ref_time)/3600))
 
     log_fn('All done.')
 
@@ -1233,11 +1361,11 @@ def create_parser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        'source_dir',
+        '--source_dir',
         help="Directory containing the input images.")
 
     parser.add_argument(
-        'target_dir',
+        '--target_dir',
         help="Output directory for the generated dataset.")
 
     parser.add_argument(
@@ -1250,6 +1378,11 @@ def create_parser():
     parser.add_argument(
         '--keep_z_until_mag',
         help="Magnification until to do anisotropic downsampling (only xy).")
+
+    parser.add_argument(
+        '--rgb',
+        action='store_true',
+        help="Specify if input is RGB.")
 
     parser.add_argument(
         '--config', '-c',
@@ -1280,6 +1413,8 @@ def main():
         CONFIG.set('Dataset', 'source_format', ARGS.format)
     if ARGS.keep_z_until_mag:
         CONFIG.set('Processing', 'keep_z_until_mag', ARGS.keep_z_until_mag)
+    if ARGS.rgb:
+        CONFIG.set('Dataset', 'rgb', ARGS.rgb)
 
     if validate_config(CONFIG):
         knossos_cuber(CONFIG, lambda x: sys.stdout.write(str(x) + '\n'))
