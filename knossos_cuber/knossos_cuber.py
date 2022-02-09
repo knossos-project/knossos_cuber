@@ -57,9 +57,10 @@ from pathlib import Path
 Image.MAX_IMAGE_PIXELS = 1e10
 
 SOURCE_FORMAT_FILES = OrderedDict()
-SOURCE_FORMAT_FILES['tif'] = ['tif', 'tiff', 'TIF', 'TIFF', '*.tif, *.tiff']
-SOURCE_FORMAT_FILES['jpg'] = ['jpg', 'jpeg', 'JPG', 'JPEG', '*.jpg, *.jpeg']
-SOURCE_FORMAT_FILES['png'] = ['png', 'PNG', '*.png']
+SOURCE_FORMAT_FILES['tif'] = ['tif', 'tiff', 'TIF', 'TIFF']
+SOURCE_FORMAT_FILES['jpg'] = ['jpg', 'jpeg', 'JPG', 'JPEG']
+SOURCE_FORMAT_FILES['png'] = ['png', 'PNG']
+SOURCE_FORMAT_FILES['raw'] = ['raw', 'RAW']
 
 
 class InvalidCubingConfigError(Exception):
@@ -411,7 +412,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                 print("Skipped cube {0}".format(job_info.trg_cube_path))
                 continue
 
-            if job_info.trg_cube_path2 is not '':
+            if job_info.trg_cube_path2 != '':
                 first_cube = cube_data[0:128, :, :]
                 second_cube = cube_data[128:256, :, :]
             else:
@@ -430,7 +431,7 @@ def downsample_dataset(config, src_mag, trg_mag, log_fn):
                                                      job_info.trg_cube_path])
                 write_threads.append(this_thread)
                 this_thread.start()
-            if job_info.trg_cube_path2 is not '' and not np.sum(second_cube) == 0:
+            if job_info.trg_cube_path2 != '' and np.sum(second_cube) != 0:
                 print('Writing second cube')
                 this_thread = threading.Thread(target=write_compressed_cube,
                                                args=[config,
@@ -494,7 +495,7 @@ def downsample_cube(job_info):
             fd = io.open(path_to_src_cube, 'rb')
             content = fd.read(-1)
             fd.close()
-            this_cube = np.fromstring(content, dtype=job_info.source_dtype)
+            this_cube = np.frombuffer(content, dtype=job_info.source_dtype)
             # this_cube = np.fromfile(path_to_src_cube, dtype=job_info.source_dtype)
         else:
             # this_cube = np.array(Image.open(io.BytesIO(content)))
@@ -543,7 +544,7 @@ def downsample_cube(job_info):
     # re-sampling without any filtering), especially
     # for noisy images. On top of that, the gains of more sophisticated
     # filters become less clear, and data and scaling factor dependent.
-    if job_info.trg_cube_path2 is not '':
+    if job_info.trg_cube_path2 != '':
         zoom = [1.0, 0.5, 0.5]
     else:
         zoom = 0.5
@@ -594,7 +595,10 @@ def compress_dataset(config, log_fn):
     list_of_all_cubes = []
     for mag_dir in find_mag_folders(dataset_base_path, log_fn):
         list_of_all_cubes.extend(
-            get_list_of_all_cubes_in_dataset(os.path.join(dataset_base_path, "mag{}".format(mag_dir)), log_fn)[1], config.get('Processing', 'allow_zero_dir', fallback=False))
+            get_list_of_all_cubes_in_dataset(
+                os.path.join(dataset_base_path, "mag{}".format(mag_dir)),
+                log_fn,
+                allow_zero_dir=config.get('Processing', 'allow_zero_dir', fallback=False))[1])
 
     compress_job_infos = []
     for cube_path in list_of_all_cubes:
@@ -663,7 +667,7 @@ def compress_cube(job_info, cube_raw = None):
             #    content += fd.read(buffersize)
             content = fd.read(-1)
             fd.close()
-            cube_raw = np.fromstring(content, dtype=np.uint8)
+            cube_raw = np.frombuffer(content, dtype=np.uint8)
             #cube_raw = np.fromfile(job_info.src_cube_path, dtype=np.uint8)
         else:
             print('Will not downsample a non-raw cube.')
@@ -787,7 +791,6 @@ def init_from_source_dir(config, log_fn):
         num_passes_per_cube_layer (int):
     """
 
-
     source_format = config.get('Dataset', 'source_format')
     source_path = config.get('Project', 'source_path')
 
@@ -795,9 +798,7 @@ def init_from_source_dir(config, log_fn):
 
     source_files = [
         f for f in os.listdir(source_path)
-        if any([f.endswith(suffix)
-            # [:-1] cuts away the description string `*.suffix'
-            for suffix in SOURCE_FORMAT_FILES[source_format][:-1]])]
+        if any([f.endswith(suffix) for suffix in SOURCE_FORMAT_FILES[source_format]])]
 
     source_path = config.get('Project', 'source_path')
     all_source_files = [source_path + '/' + s for s in source_files]
@@ -810,17 +811,20 @@ def init_from_source_dir(config, log_fn):
 
     num_z = len(all_source_files)
 
-    # open the first image and extract the relevant information - all images are
-    # assumed to have equal dimensions!
-    # PIL will read the image into a (y, x) indexed array
-    test_img = Image.open(all_source_files[0])
-    test_data = np.array(test_img)
+    if source_format == 'raw':
+        source_dims = literal_eval(config.get('Dataset', 'source_dims'))[::-1]
+    else:
+        # open the first image and extract the relevant information - all images are
+        # assumed to have equal dimensions!
+        # PIL will read the image into a (y, x) indexed array
+        test_img = Image.open(all_source_files[0])
+        test_data = np.array(test_img)
 
-    source_dims = test_data.shape
-    config.set('Dataset', 'source_dims', str((test_data.shape[1], test_data.shape[0])))
-    config.set('Dataset', 'source_dtype', str(test_data.dtype))
-    print(test_data.shape)
-    print(test_data.dtype)
+        source_dims = test_data.shape
+        config.set('Dataset', 'source_dims', str((test_data.shape[1], test_data.shape[0])))
+        config.set('Dataset', 'source_dtype', str(test_data.dtype))
+        print(test_data.shape)
+        print(test_data.dtype)
 
     #q (important for division below!) Why getfloat, not getint? It is int in the config.ini and that would make more sense.
     cube_edge_len = config.getfloat('Processing', 'cube_edge_len')
@@ -869,6 +873,36 @@ def init_from_source_dir(config, log_fn):
     return cube_info
 
 
+def load_image(in_fname, use_simple_image_open=True, is_raw=False, xy_dims=None, dtype=None):
+    if not is_raw:
+        if use_simple_image_open:
+            # This is much faster on a normal workstation than the
+            # buffering code below. Recommended solution on a cluster
+            # is to copy the image to a memory mapped drive first
+            # and then use PIL open on that memory mapped file.
+            PIL_image = Image.open(in_fname)
+        else:
+            fsize = os.stat(in_fname).st_size
+            buffersize = 524288 // 2  # optimal for soma cluster #d int/int
+            content = b''
+            # This is optimized code, do not think that a single line
+            # would be faster. At least on the soma MPI cluster,
+            # the default buffering values (read entire file into buffer
+            # instead of smaller chunks) leads to delays and slowness.
+            fd = io.open(in_fname, 'r+b', buffering=buffersize)
+            for i in range(0, (fsize // buffersize) + 1):  # d int/int
+                content += fd.read(buffersize)
+            fd.close()
+            PIL_image = Image.open(io.BytesIO(content))
+
+        this_layer = np.array(PIL_image)
+    else:
+        # This is incorrect when the writing / reading raw files on platforms with different endianness.
+        this_layer = np.fromfile(in_fname, dtype=dtype).reshape(xy_dims[::-1])
+
+    return this_layer
+
+
 def make_mag1_cubes_from_z_stack(config,
                                  all_source_files,
                                  num_x_cubes_per_pass,
@@ -915,6 +949,7 @@ def make_mag1_cubes_from_z_stack(config,
                 log_fn("Skipping cube layer: {0}".format(cur_z))
                 continue
 
+        print([cube_edge_len, num_y_cubes * cube_edge_len, num_x_cubes_per_pass * cube_edge_len, ])
         for cur_pass in range(0, num_passes_per_cube_layer):
             # allocate memory for this layer
             this_layer_out_block = np.zeros(
@@ -939,27 +974,12 @@ def make_mag1_cubes_from_z_stack(config,
 
                 ref_time = time.time()
 
-                if config.getboolean('Processing', 'use_simple_image_open'):
-                    # This is much faster on a normal workstation than the
-                    # buffering code below. Recommended solution on a cluster
-                    # is to copy the image to a memory mapped drive first
-                    # and then use PIL open on that memory mapped file.
-                    PIL_image = Image.open(all_source_files[z])
-                else:
-                    fsize = os.stat(all_source_files[z]).st_size
-                    buffersize = 524288//2 # optimal for soma cluster #d int/int
-                    content = b''
-                    # This is optimized code, do not think that a single line
-                    # would be faster. At least on the soma MPI cluster,
-                    # the default buffering values (read entire file into buffer
-                    # instead of smaller chunks) leads to delays and slowness.
-                    fd = io.open(all_source_files[z], 'r+b', buffering=buffersize)
-                    for i in range(0, (fsize // buffersize) + 1): #d int/int
-                        content += fd.read(buffersize)
-                    fd.close()
-                    PIL_image = Image.open(io.BytesIO(content))
-
-                this_layer = np.array(PIL_image)
+                this_layer = load_image(
+                    all_source_files[z],
+                    use_simple_image_open=config.getboolean('Processing', 'use_simple_image_open'),
+                    is_raw=True if config.get('Dataset', 'source_format').lower() == 'raw' else False,
+                    xy_dims=source_dims,
+                    dtype=source_dtype)
                 if invert:
                     this_layer = np.iinfo(source_dtype).max - this_layer
 
